@@ -25,8 +25,8 @@ SEVEN_ZIP_EXE_CANDIDATES = [
     Path("/usr/lib/7zip/7z"),
     ENGINES_DIR / "7zip" / "7z",
     ENGINES_DIR / "7zip" / "7z.exe",
-    Path(r"C:\\Program Files\\7-Zip\\7z.exe"),
-    Path(r"C:\\Program Files (x86)\\7-Zip\\7z.exe"),
+    Path(r"C:\Program Files\7-Zip\7z.exe"),
+    Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
 ]
 
 
@@ -45,8 +45,8 @@ DEFAULT_SETTINGS: dict = {
     "accent": "#3b82f6",
     "compression_level": 5,
     "default_format": "7z",
-    "independent_zip_max_mb": 100,
-    "independent_zip_ceiling_mb": 0,
+    "independent_zip_max_mb": 100,  # user-configurable, no forced limit
+    "independent_zip_ceiling_mb": 0,  # 0 = unlimited; user sets max only
     "volume_size_mb": 100,
     "preserve_timestamps": True,
     "safe_extraction": True,

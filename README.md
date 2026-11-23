@@ -4,70 +4,152 @@
 
 [![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/bravocompanycyber-rgb/Volumax)
 [![Python](https://img.shields.io/badge/python-3.12%2B-yellow)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Proprietary-lightgrey)](LICENSE)
 
 VOLUMAX competes with tools like **7-Zip**, **WinRAR**, and **WinZip** while adding intelligent packaging, strong encryption defaults, safe extraction, and a polished job queue.
+
+---
 
 ## Features
 
 ### Core archive management
-- **ZIP** — create & extract (AES-256 when passworded)
-- **7Z** — create & extract (AES-256 + optional encrypted filenames)
-- **TAR / TAR.GZ / TAR.BZ2 / TAR.XZ** — create & extract
-- **RAR** — extract via 7-Zip (create requires external WinRAR/`rar`)
-- Browse without full extract, selective extract, convert formats, integrity test
-- Unicode & long path support; preserve timestamps & folder structure
+| Format | Open / Extract | Create |
+|--------|----------------|--------|
+| ZIP | ✅ | ✅ (AES-256 when passworded) |
+| 7Z | ✅ | ✅ (AES-256 + optional encrypted filenames) |
+| TAR / TAR.GZ / TAR.BZ2 / TAR.XZ | ✅ | ✅ |
+| RAR | ✅ (via 7-Zip) | ❌ (requires WinRAR/`rar` — extract only) |
+| CAB / ISO / WIM | ✅ (backend-dependent) | Limited |
+
+- Browse without full extract  
+- Selective extract  
+- Convert between formats  
+- Integrity test  
+- Unicode & long path support  
+- Preserve timestamps & folder structure  
 
 ### Intelligent packaging
-- **Independent ZIP packages** — each ZIP fully extractable alone
-- **You choose the size limit** — no forced 20/30 MB cap
-- Actual output size verification
-- **Multipart volumes** (`Backup.7z.001`, `.002`, …) with sequence checks
+- **Independent ZIP packages** — each ZIP is fully extractable on its own  
+- **You choose the size limit** — no forced 20/30 MB cap (set 1 MB to 100+ GB as needed)  
+- Actual output size verification  
+- Smart file grouping & collision handling  
+- **Multipart volumes** (`Backup.7z.001`, `.002`, …) with sequence checks  
 
 ### Security
-- **AES-256** encryption (7Z and ZIP via 7-Zip)
-- Encrypted filenames/headers (7Z)
-- Password strength assessment & secure generator
-- Path-traversal & archive-bomb protection
+- **AES-256** encryption (7Z and ZIP via 7-Zip)  
+- Encrypted filenames / headers (7Z)  
+- Password strength assessment  
+- Secure password generator  
+- Path-traversal & archive-bomb protection  
+- Staging extraction  
 
 ### Tools
-- Integrity Centre (SHA-256 / SHA-512 / MD5 / SHA-1)
-- Duplicate finder
-- Background job queue with cancel
+- Integrity Centre (CRC / SHA-1 / SHA-256 / SHA-512)  
+- Duplicate finder (content hash)  
+- Background job queue (progress + cancel)  
+- Checksums for any file  
 
 ### Professional UI
-Dark navy high-contrast interface: Dashboard · Create · Extract · Browser · Packages · Volumes · Integrity · Duplicates · Job Queue · Settings
+Dark navy interface, high contrast, dashboard navigation:
+
+Dashboard · Create · Extract · Browser · Packages · Volumes · Integrity · Duplicates · Job Queue · Settings
+
+---
 
 ## Requirements
 
-- Windows 10/11
-- Python 3.12+
-- PySide6, psutil, pytest, ruff, pyinstaller
-- Official 7-Zip engine in `engines/7zip/` (`7z.exe` + `7z.dll`)
+- Windows 10/11 (primary target)  
+- Python 3.12+ (3.14 supported)  
+- Dependencies: `PySide6`, `psutil`, `pytest`, `ruff`, `pyinstaller`  
+- Official **7-Zip** engine: place `7z.exe` + `7z.dll` in `engines/7zip/`  
+
+```text
+engines/
+└── 7zip/
+    ├── 7z.exe
+    └── 7z.dll
+```
+
+---
 
 ## Quick start
 
 ```powershell
 cd Volumax
-\.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1   # or create venv and pip install -r requirements.txt
 $env:PYTHONPATH = "src"
 python -m volumax
 ```
 
-## Tests
+### Tests
 
 ```powershell
 $env:PYTHONPATH = "src"
 python -m pytest tests -v
 ```
 
-## Build
+### Build Windows executable
 
 ```powershell
 .\BUILD-VOLUMAX.ps1
 ```
 
-## Repository
+---
 
-**https://github.com/bravocompanycyber-rgb/Volumax**
+## Architecture
 
-Bravo Company Cyber / Bravo Projects
+```
+src/volumax/
+├── backends/          # Extensible engine adapters (7-Zip primary)
+├── engine.py          # Facade + native ZIP helpers
+├── extraction.py      # Safe extraction
+├── packaging.py       # Independent packages (user-defined sizes)
+├── volume_manager.py  # Multipart volumes
+├── security.py        # Password strength + AES guidance
+├── integrity.py / checksums.py / duplicate_finder.py
+├── jobs.py            # Background queue
+└── ui/                # PySide6 professional desktop UI
+```
+
+Designed so new backends, formats, and plugins can be added without rewriting the UI.
+
+---
+
+## Compared to other tools
+
+| Capability | VOLUMAX | 7-Zip | WinRAR | WinZip |
+|------------|---------|-------|-------|--------|
+| 7Z create/extract | ✅ | ✅ | ✅ | Limited |
+| ZIP AES-256 | ✅ | ✅ | ✅ | ✅ |
+| Independent size-limited packages | ✅ | — | — | — |
+| Multipart volumes | ✅ | ✅ | ✅ | ✅ |
+| RAR extract | ✅ | ✅ | ✅ | ✅ |
+| RAR create | External | — | ✅ | — |
+| Safe extraction policies | ✅ | Partial | Partial | Partial |
+| Job queue UI | ✅ | — | Limited | Limited |
+| Duplicate finder | ✅ | — | — | — |
+
+---
+
+## Roadmap (modular upgrades)
+
+- Watch folders & automation rules  
+- Plugin API for extra formats  
+- Context-menu shell integration  
+- Installer (Inno Setup)  
+- Optional RAR create when `rar.exe` is present  
+
+---
+
+## Project
+
+- **Repository:** [bravocompanycyber-rgb/Volumax](https://github.com/bravocompanycyber-rgb/Volumax)  
+- **Organization:** Bravo Company Cyber  
+
+Replace `assets/logo.ico` and `assets/logo.png` with your final branding — no code changes required.
+
+---
+
+## License
+
+Proprietary — Bravo Projects / Bravo Company Cyber. All rights reserved.
