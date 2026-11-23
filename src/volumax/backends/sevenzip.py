@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Sequence
@@ -19,6 +22,9 @@ from .base import (
 )
 
 logger = logging.getLogger("volumax.backends.sevenzip")
+
+_PERCENT_RE = re.compile(r"^\s*(\d{1,3})%")
+_SPLIT_RE = re.compile(r"[\x08\r\n]+")
 
 
 class SevenZipBackend(ArchiveBackend):
@@ -54,14 +60,13 @@ class SevenZipBackend(ArchiveBackend):
         cmd = [str(self.exe), *args]
         logger.debug("CMD: %s", " ".join(cmd))
         env = None
+        lib_dir = self.exe.parent
+        if (lib_dir / "7z.so").exists() or (lib_dir / "7z.dll").exists():
+            env = os.environ.copy()
+            env["LD_LIBRARY_PATH"] = str(lib_dir) + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+        # Don't flash a console window on Windows
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
-            import os
-            lib_dir = self.exe.parent
-            so = lib_dir / "7z.so"
-            dll = lib_dir / "7z.dll"
-            if so.exists() or dll.exists():
-                env = os.environ.copy()
-                env["LD_LIBRARY_PATH"] = str(lib_dir) + os.pathsep + env.get("LD_LIBRARY_PATH", "")
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -70,31 +75,95 @@ class SevenZipBackend(ArchiveBackend):
                 encoding="utf-8",
                 errors="replace",
                 env=env,
+                creationflags=creationflags,
             )
         except OSError as exc:
             return BackendResult(False, f"Cannot start 7-Zip: {exc}")
 
-        while True:
-            if cancel and cancel():
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                return BackendResult(False, "Cancelled by user", -1)
-            if proc.poll() is not None:
-                break
-            time.sleep(0.04)
+        out_lines: list[str] = []
+        err_lines: list[str] = []
 
-        stdout, stderr = proc.communicate()
+        track = "-bsp1" in args  # only a/x/t emit progress; listings must stay raw
+
+        def pump_stdout() -> None:
+            assert proc.stdout is not None
+            if not track:
+                out_lines.append(proc.stdout.read())  # drains continuously
+                return
+            # 7-Zip redraws its progress using backspaces/CRs, so split on those.
+            last = -1
+            buf = ""
+
+            def handle(part: str) -> None:
+                nonlocal last
+                m = _PERCENT_RE.match(part)
+                if m:
+                    pct = min(100, int(m.group(1)))
+                    if progress and pct != last:
+                        last = pct
+                        try:
+                            progress(pct, part.strip()[:120])
+                        except Exception:  # a UI callback must never kill the pump
+                            logger.exception("progress callback failed")
+                elif part.strip():
+                    out_lines.append(part + "\n")
+
+            while True:
+                chunk = proc.stdout.read(8192)
+                if not chunk:
+                    break
+                parts = _SPLIT_RE.split(buf + chunk)
+                buf = parts.pop()  # possibly incomplete trailing fragment
+                for part in parts:
+                    handle(part)
+            handle(buf)
+
+        def pump_stderr() -> None:
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                err_lines.append(line)
+
+        # Drain both pipes continuously: a full pipe buffer would block 7-Zip
+        # forever on large listings/extractions.
+        threads = [
+            threading.Thread(target=pump_stdout, daemon=True),
+            threading.Thread(target=pump_stderr, daemon=True),
+        ]
+        for t in threads:
+            t.start()
+
+        deadline = time.monotonic() + timeout if timeout else None
+        try:
+            while True:
+                if cancel and cancel():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    return BackendResult(False, "Cancelled by user", -1)
+                if deadline and time.monotonic() > deadline:
+                    proc.kill()
+                    return BackendResult(False, f"7-Zip timed out after {timeout}s", -2)
+                try:
+                    proc.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            for t in threads:
+                t.join(timeout=5)
+
+        stdout = "".join(out_lines)
+        stderr = "".join(err_lines)
         success = proc.returncode == 0
         msg = "OK" if success else (stderr or stdout or f"Exit {proc.returncode}").strip()
         return BackendResult(
             success=success,
             message=msg[:2000],
             returncode=proc.returncode,
-            stdout=stdout or "",
-            stderr=stderr or "",
+            stdout=stdout,
+            stderr=stderr,
         )
 
     def list_archive(self, archive: Path, password: str | None = None) -> BackendResult:
@@ -156,7 +225,7 @@ class SevenZipBackend(ArchiveBackend):
         archive = Path(archive)
         archive.parent.mkdir(parents=True, exist_ok=True)
         fmt = format.replace("tar.gz", "gzip").replace("tar.bz2", "bzip2").replace("tar.xz", "xz")
-        args: list[str] = ["a", f"-t{fmt}", f"-mx={level}", "-y", "-bsp1"]
+        args: list[str] = ["a", f"-t{fmt}", f"-mx={level}", "-mmt=on", "-y", "-bsp1"]
         if password:
             args.append(f"-p{password}")
             if encrypt_filenames and fmt == "7z":
@@ -189,7 +258,7 @@ class SevenZipBackend(ArchiveBackend):
     ) -> BackendResult:
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
-        args = ["x", "-y", "-aoa" if overwrite else "-aos"]
+        args = ["x", "-y", "-mmt=on", "-bsp1", "-aoa" if overwrite else "-aos"]
         if password:
             args.append(f"-p{password}")
         args.extend([f"-o{destination}", str(archive)])
@@ -205,7 +274,7 @@ class SevenZipBackend(ArchiveBackend):
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
     ) -> BackendResult:
-        args = ["t"]
+        args = ["t", "-mmt=on", "-bsp1"]
         if password:
             args.append(f"-p{password}")
         args.append(str(archive))

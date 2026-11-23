@@ -28,8 +28,7 @@ class QueuePanel(QWidget):
         self._build()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
-        self.timer.start(1000)
-        self.queue.add_listener(lambda j: self.refresh())
+        self.timer.start(500)  # polled on the GUI thread; no cross-thread widget calls
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
@@ -61,16 +60,24 @@ class QueuePanel(QWidget):
         layout.addLayout(row)
 
     def refresh(self) -> None:
-        jobs = self.queue.list_jobs()
-        self.table.setRowCount(0)
-        for job in sorted(jobs, key=lambda j: j.created_at, reverse=True):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(job.id))
-            self.table.setItem(row, 1, QTableWidgetItem(job.name))
-            self.table.setItem(row, 2, QTableWidgetItem(job.state.name))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{job.progress}%"))
-            self.table.setItem(row, 4, QTableWidgetItem(job.message or job.error or ""))
+        jobs = sorted(self.queue.list_jobs(), key=lambda j: j.created_at, reverse=True)
+        if self.table.rowCount() != len(jobs):
+            self.table.setRowCount(len(jobs))
+        self.table.setUpdatesEnabled(False)
+        try:
+            for row, job in enumerate(jobs):
+                values = (
+                    job.id, job.name, job.state.name, f"{job.progress}%",
+                    job.message or job.error or "",
+                )
+                for col, text in enumerate(values):
+                    item = self.table.item(row, col)
+                    if item is None:
+                        self.table.setItem(row, col, QTableWidgetItem(text))
+                    elif item.text() != text:
+                        item.setText(text)  # in place: keeps the user's selection
+        finally:
+            self.table.setUpdatesEnabled(True)
 
     def _cancel(self) -> None:
         rows = self.table.selectionModel().selectedRows()

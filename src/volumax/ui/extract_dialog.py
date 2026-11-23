@@ -120,6 +120,8 @@ class ExtractArchiveDialog(QWidget):
                 password=password,
                 overwrite=overwrite,
                 safe=safe,
+                progress=progress,
+                cancel=cancel,
             )
 
         j = get_job_queue().submit(f"Extract {Path(arch).name}", job)

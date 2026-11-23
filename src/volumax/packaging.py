@@ -30,6 +30,7 @@ class PackagePlan:
     output_path: Path | None = None
     actual_size: int = 0
     error: str | None = None
+    names: set[str] = field(default_factory=set, repr=False)  # arcname index
 
 
 @dataclass
@@ -154,31 +155,31 @@ class IndependentZipPackager:
         for item in usable:
             placed = False
             for pkg in packages:
-                # Collision check
-                existing_names = {f.arcname for f in pkg.files}
-                if item.arcname in existing_names:
-                    # Try to uniquify
+                # Cheap size check first, then O(1) name-collision check
+                if pkg.estimated_size + item.size > self.max_bytes:
+                    continue
+                if item.arcname in pkg.names:
                     stem, ext = os.path.splitext(item.arcname)
                     candidate = item.arcname
                     n = 1
-                    while candidate in existing_names:
+                    while candidate in pkg.names:
                         candidate = f"{stem}_{n}{ext}"
                         n += 1
                     item = FileItem(item.source, candidate, item.size)
-
-                # Conservative estimate: assume little compression for planning
-                # We still verify actual size after creation
-                if pkg.estimated_size + item.size <= self.max_bytes:
-                    pkg.files.append(item)
-                    pkg.estimated_size += item.size
-                    placed = True
-                    break
+                pkg.files.append(item)
+                pkg.names.add(item.arcname)
+                pkg.estimated_size += item.size
+                placed = True
+                break
 
             if not placed:
                 idx = len(packages) + 1
                 out = output_dir / f"{base_name}_{idx:03d}.zip"
                 packages.append(
-                    PackagePlan(index=idx, files=[item], estimated_size=item.size, output_path=out)
+                    PackagePlan(
+                        index=idx, files=[item], estimated_size=item.size,
+                        output_path=out, names={item.arcname},
+                    )
                 )
 
         return PackagingResult(True, packages=packages, skipped=skipped)

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .backends.base import ArchiveEntry, BackendResult
+from .config import LOW_GAIN_EXTENSIONS
 
 # Public re-exports
 __all__ = ["ArchiveEntry", "BackendResult", "EngineResult", "SevenZipEngine", "create_zip_native", "extract_zip_native"]
@@ -69,6 +70,7 @@ def create_zip_native(
     *,
     compression: int = zipfile.ZIP_DEFLATED,
     compresslevel: int = 6,
+    smart: bool = True,
 ) -> BackendResult:
     archive = Path(archive)
     archive.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +85,9 @@ def create_zip_native(
                     if not arcname.endswith("/"):
                         arcname += "/"
                     zf.writestr(arcname, b"")
+                elif smart and src.suffix.lower() in LOW_GAIN_EXTENSIONS:
+                    # jpg/mp4/zip/... don't shrink: storing is much faster
+                    zf.write(src, arcname, compress_type=zipfile.ZIP_STORED)
                 else:
                     zf.write(src, arcname)
         size = archive.stat().st_size

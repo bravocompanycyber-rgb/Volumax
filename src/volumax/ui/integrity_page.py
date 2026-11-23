@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from ..archive_manager import ArchiveManager
 from ..checksums import hash_file, SUPPORTED_ALGORITHMS
-from ..jobs import get_job_queue
+from .widgets.workers import run_in_background
 
 
 class IntegrityPage(QWidget):
@@ -87,20 +87,16 @@ class IntegrityPage(QWidget):
             QMessageBox.warning(self, "Missing", "Select a valid archive.")
             return
         pwd = self.pwd.text() or None
+        self.output.append(f"Testing {path} …\n")
 
-        def job(progress=None, cancel=None):
+        def work():
             return self.manager.test_integrity(Path(path), password=pwd)
 
-        j = get_job_queue().submit(f"Integrity {Path(path).name}", job)
-        self.output.append(f"Queued integrity test (job {j.id})…\n")
-
-        # Also run synchronously for immediate feedback on small archives
-        try:
-            res = self.manager.test_integrity(Path(path), password=pwd)
+        def done(res):
             status = "PASSED" if res.success else "FAILED"
             self.output.append(f"[{status}] {res.message}\n")
-        except Exception as exc:
-            self.output.append(f"Error: {exc}\n")
+
+        self._test_task = run_in_background(work, done, lambda m: self.output.append(f"Error: {m}\n"))
 
     def _hash(self):
         path = self.file_edit.text().strip()
@@ -108,8 +104,9 @@ class IntegrityPage(QWidget):
             QMessageBox.warning(self, "Missing", "Select a file.")
             return
         algo = self.algo.currentText()
-        try:
-            digest = hash_file(Path(path), algo)
-            self.output.append(f"{algo.upper()}  {digest}  {path}\n")
-        except Exception as exc:
-            self.output.append(f"Error: {exc}\n")
+        self.output.append(f"Hashing {path} …\n")
+        self._hash_task = run_in_background(
+            lambda: hash_file(Path(path), algo),
+            lambda digest: self.output.append(f"{algo.upper()}  {digest}  {path}\n"),
+            lambda m: self.output.append(f"Error: {m}\n"),
+        )

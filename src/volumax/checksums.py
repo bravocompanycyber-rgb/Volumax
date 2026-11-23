@@ -16,20 +16,28 @@ def hash_file(
     path: Path,
     algorithm: str = "sha256",
     *,
-    chunk_size: int = 1024 * 1024,
+    chunk_size: int = 4 * 1024 * 1024,
     progress: ProgressCb | None = None,
+    max_bytes: int | None = None,
 ) -> str:
+    """Hash a file. ``max_bytes`` hashes only the first N bytes (quick pre-check)."""
     path = Path(path)
+    if progress is None and max_bytes is None:
+        with open(path, "rb") as f:
+            return hashlib.file_digest(f, algorithm).hexdigest()  # C-speed loop
+
     h = hashlib.new(algorithm)
-    total = path.stat().st_size
+    total = path.stat().st_size if max_bytes is None else min(max_bytes, path.stat().st_size)
     done = 0
-    with open(path, "rb") as f:
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
+    buf = bytearray(chunk_size)
+    view = memoryview(buf)
+    with open(path, "rb", buffering=0) as f:
+        while done < total:
+            n = f.readinto(view[: min(chunk_size, total - done)])
+            if not n:
                 break
-            h.update(chunk)
-            done += len(chunk)
+            h.update(view[:n])
+            done += n
             if progress:
                 progress(done, total)
     return h.hexdigest()

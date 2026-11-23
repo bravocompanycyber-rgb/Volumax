@@ -45,6 +45,8 @@ class ArchiveManager:
         password: str | None = None,
         encrypt_filenames: bool = False,
         volume_size: str | None = None,
+        progress=None,
+        cancel=None,
     ) -> EngineResult:
         if volume_size:
             return self.volumes.create_volumes(
@@ -63,6 +65,8 @@ class ArchiveManager:
             level=level,
             password=password,
             encrypt_filenames=encrypt_filenames,
+            progress=progress,
+            cancel=cancel,
         )
 
     # ---- Extract ----------------------------------------------------------
@@ -76,6 +80,8 @@ class ArchiveManager:
         selected: Sequence[str] | None = None,
         overwrite: bool = True,
         safe: bool = True,
+        progress=None,
+        cancel=None,
     ) -> EngineResult:
         if safe:
             return self.extractor.extract(
@@ -84,6 +90,8 @@ class ArchiveManager:
                 password=password,
                 selected=selected,
                 overwrite=overwrite,
+                progress=progress,
+                cancel=cancel,
             )
         return self.engine.extract_archive(
             archive,
@@ -91,6 +99,8 @@ class ArchiveManager:
             password=password,
             selected_files=selected,
             overwrite=overwrite,
+            progress=progress,
+            cancel=cancel,
         )
 
     # ---- Independent packages ---------------------------------------------

@@ -162,6 +162,8 @@ class CreateArchiveDialog(QWidget):
                 level=level,
                 password=password,
                 encrypt_filenames=encrypt,
+                progress=progress,
+                cancel=cancel,
             )
 
         queue = get_job_queue()
