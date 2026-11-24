@@ -96,7 +96,22 @@ class VolumeDialog(QWidget):
         self.btn.setObjectName("gold")
         self.btn.clicked.connect(self._run)
         layout.addWidget(self.btn)
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet("color: #8b9bb4;")
+        layout.addWidget(self.status_lbl)
         layout.addStretch()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        for u in event.mimeData().urls():
+            p = Path(u.toLocalFile())
+            if u.isLocalFile() and p.exists() and p not in self.sources:
+                self.sources.append(p)
+                self.source_list.addItem(str(p))
 
     def _add_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Select Files")
@@ -133,13 +148,16 @@ class VolumeDialog(QWidget):
         vol = f"{self.vol_size.value()}m"
         fmt = self.format_combo.currentText()
 
-        def job(progress=None, cancel=None):
-            return self.manager.create(
-                Path(out),
-                self.sources,
-                format=fmt,
-                volume_size=vol,
+        sources = list(self.sources)  # snapshot
+        manager = self.manager
+        preset = self.settings.compression_preset
+        archive = Path(out)
+
+        def job(progress=None, cancel=None, pause=None):
+            return manager.create(
+                archive, sources, format=fmt, volume_size=vol, preset=preset,
+                progress=progress, cancel=cancel, pause=pause,
             )
 
         j = get_job_queue().submit("Create volumes", job)
-        QMessageBox.information(self, "Queued", f"Volume creation job {j.id} queued.")
+        self.status_lbl.setText(f"Queued as job {j.id} — progress is in the Job Queue.")

@@ -51,11 +51,23 @@ class QueuePanel(QWidget):
         btn_refresh = QPushButton("Refresh")
         btn_refresh.setObjectName("secondary")
         btn_refresh.clicked.connect(self.refresh)
+        btn_pause = QPushButton("Pause")
+        btn_pause.setObjectName("secondary")
+        btn_pause.clicked.connect(lambda: self._pause(True))
+        btn_resume = QPushButton("Resume")
+        btn_resume.setObjectName("secondary")
+        btn_resume.clicked.connect(lambda: self._pause(False))
         btn_cancel = QPushButton("Cancel Selected")
         btn_cancel.setObjectName("danger")
         btn_cancel.clicked.connect(self._cancel)
+        btn_clear = QPushButton("Clear Finished")
+        btn_clear.setObjectName("secondary")
+        btn_clear.clicked.connect(self._clear_finished)
         row.addWidget(btn_refresh)
+        row.addWidget(btn_pause)
+        row.addWidget(btn_resume)
         row.addWidget(btn_cancel)
+        row.addWidget(btn_clear)
         row.addStretch()
         layout.addLayout(row)
 
@@ -79,9 +91,27 @@ class QueuePanel(QWidget):
         finally:
             self.table.setUpdatesEnabled(True)
 
+    def _selected_ids(self) -> list[str]:
+        return [self.table.item(i.row(), 0).text() for i in self.table.selectionModel().selectedRows()]
+
+    def _pause(self, pause: bool) -> None:
+        for job_id in self._selected_ids():
+            job = self.queue.get(job_id)
+            if job and job.state in (JobState.RUNNING, JobState.PAUSED):
+                job.request_pause() if pause else job.request_resume()
+        self.refresh()
+
+    def _clear_finished(self) -> None:
+        self.queue.clear_finished()
+        self.table.setRowCount(0)
+        self.refresh()
+
     def _cancel(self) -> None:
         rows = self.table.selectionModel().selectedRows()
         for idx in rows:
             job_id = self.table.item(idx.row(), 0).text()
+            job = self.queue.get(job_id)
+            if job and job.is_paused():
+                job.request_resume()  # a suspended process must run to notice the cancel
             self.queue.cancel(job_id)
         self.refresh()

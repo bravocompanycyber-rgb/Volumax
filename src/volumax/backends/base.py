@@ -55,7 +55,7 @@ class ArchiveBackend(ABC):
 
     @abstractmethod
     def list_archive(
-        self, archive: Path, password: str | None = None
+        self, archive: Path, password: str | None = None, detailed: bool = False
     ) -> BackendResult: ...
 
     @abstractmethod
@@ -72,6 +72,7 @@ class ArchiveBackend(ABC):
         volume_size: str | None = None,
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
+        **options: object,
     ) -> BackendResult: ...
 
     @abstractmethod
@@ -85,6 +86,7 @@ class ArchiveBackend(ABC):
         overwrite: bool = True,
         progress: ProgressCallback | None = None,
         cancel: CancelCheck | None = None,
+        pause: CancelCheck | None = None,
     ) -> BackendResult: ...
 
     @abstractmethod

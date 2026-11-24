@@ -26,8 +26,31 @@ class SevenZipEngine:
     def __init__(self, exe_path: Path | None = None) -> None:
         self._backend = SevenZipBackend(exe_path)
 
-    def list_archive(self, archive: Path, password: str | None = None) -> BackendResult:
-        return self._backend.list_archive(archive, password=password)
+    @property
+    def exe(self) -> Path:
+        return self._backend.exe
+
+    def version(self) -> str:
+        """First line of 7-Zip's banner, e.g. '7-Zip 23.01 (x64) : Copyright ...'."""
+        import subprocess
+
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            out = subprocess.run(
+                [str(self.exe)], capture_output=True, text=True, timeout=10,
+                stdin=subprocess.DEVNULL, creationflags=flags,
+            ).stdout
+            for line in out.splitlines():
+                if "7-Zip" in line:
+                    return line.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return "unknown"
+
+    def list_archive(
+        self, archive: Path, password: str | None = None, detailed: bool = False
+    ) -> BackendResult:
+        return self._backend.list_archive(archive, password=password, detailed=detailed)
 
     def create_archive(self, archive: Path, sources: Sequence[Path], **kwargs) -> BackendResult:
         return self._backend.create_archive(archive, sources, **kwargs)
@@ -46,21 +69,48 @@ class SevenZipEngine:
         format: str = "7z",
         level: int = 5,
         password: str | None = None,
+        target_password: str | None = None,
         progress=None,
         cancel=None,
+        pause=None,
+        **options,
     ) -> BackendResult:
+        """Re-pack ``source`` as ``target``. ``password`` opens the source;
+        ``target_password`` (default: none) protects the result.
+
+        The working folder is created NEXT TO the target (same drive as the output),
+        not in the system temp folder, which is often a small system drive."""
+        import shutil
         import tempfile
-        with tempfile.TemporaryDirectory(prefix="volumax_conv_") as tmp:
+
+        def scaled(lo: int, hi: int):
+            if not progress:
+                return None
+            return lambda pct, msg="": progress(lo + (hi - lo) * pct // 100, msg)
+
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            tmp_ctx = tempfile.TemporaryDirectory(prefix=".volumax_conv_", dir=target.parent)
+        except OSError:
+            tmp_ctx = tempfile.TemporaryDirectory(prefix="volumax_conv_")
+        with tmp_ctx as tmp:
             tmp_path = Path(tmp)
-            res = self.extract_archive(source, tmp_path, password=password, progress=progress, cancel=cancel)
+            res = self.extract_archive(
+                source, tmp_path, password=password,
+                progress=scaled(0, 50), cancel=cancel, pause=pause,
+            )
             if not res.success:
                 return res
             items = list(tmp_path.iterdir())
             if not items:
                 return BackendResult(False, "Source archive was empty")
+            if target.exists():
+                target.unlink()
             return self.create_archive(
-                target, items, format=format, level=level, password=password,
-                progress=progress, cancel=cancel,
+                target, items, format=format, level=level,
+                password=target_password,
+                progress=scaled(50, 100), cancel=cancel, pause=pause, **options,
             )
 
 

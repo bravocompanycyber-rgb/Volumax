@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -42,10 +43,21 @@ class Settings:
     def save(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._path, "w", encoding="utf-8") as f:
+            # Atomic write: a crash mid-save must never leave a corrupt settings file
+            tmp = self._path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, self._path)
         except OSError as exc:
             logger.error("Failed to save settings: %s", exc)
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def reset(self) -> None:
+        self._data = deepcopy(DEFAULT_SETTINGS)
+        self.save()
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
@@ -75,6 +87,10 @@ class Settings:
     @property
     def compression_level(self) -> int:
         return int(self._data.get("compression_level", 5))
+
+    @property
+    def compression_preset(self) -> str:
+        return str(self._data.get("compression_preset", "maximum"))
 
     @property
     def safe_extraction(self) -> bool:

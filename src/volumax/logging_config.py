@@ -27,10 +27,12 @@ def setup_logging(level: str = "INFO", log_to_file: bool = True) -> logging.Logg
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(numeric_level)
-    console.setFormatter(formatter)
-    root.addHandler(console)
+    # A --windowed (no console) build has sys.stdout = None; logging to it would raise.
+    if sys.stdout is not None:
+        console = logging.StreamHandler(sys.stdout)
+        console.setLevel(numeric_level)
+        console.setFormatter(formatter)
+        root.addHandler(console)
 
     if log_to_file:
         file_handler = RotatingFileHandler(

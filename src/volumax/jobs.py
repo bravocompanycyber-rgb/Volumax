@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -45,9 +46,13 @@ class Job:
 
     def request_pause(self) -> None:
         self._pause_flag = True
+        if self.state == JobState.RUNNING:
+            self.state = JobState.PAUSED
 
     def request_resume(self) -> None:
         self._pause_flag = False
+        if self.state == JobState.PAUSED:
+            self.state = JobState.RUNNING
 
     def is_cancelled(self) -> bool:
         return self._cancel_flag
@@ -116,6 +121,12 @@ class JobQueue:
             return True
         return False
 
+    def clear_finished(self) -> None:
+        done = (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED)
+        with self._lock:
+            for jid in [j.id for j in self._jobs.values() if j.state in done]:
+                del self._jobs[jid]
+
     def _ensure_worker(self) -> None:
         if self._worker and self._worker.is_alive():
             return
@@ -151,17 +162,22 @@ class JobQueue:
                 job.message = msg
             self._notify(job)
 
-        # Inject helpers if the callable accepts them
+        # Inject helpers, but only the ones the callable actually accepts
         kwargs = dict(job.kwargs)
-        if "progress" not in kwargs:
-            kwargs["progress"] = progress_cb
-        if "cancel" not in kwargs:
-            kwargs["cancel"] = job.is_cancelled
+        try:
+            params = inspect.signature(job.fn).parameters
+            takes_any = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        except (TypeError, ValueError):
+            params, takes_any = {}, True
+        for name, value in (
+            ("progress", progress_cb),
+            ("cancel", job.is_cancelled),
+            ("pause", job.is_paused),
+        ):
+            if name not in kwargs and (takes_any or name in params):
+                kwargs[name] = value
 
         try:
-            while job.is_paused() and not job.is_cancelled():
-                time.sleep(0.2)
-
             if job.is_cancelled():
                 job.state = JobState.CANCELLED
                 job.message = "Cancelled"
@@ -170,11 +186,17 @@ class JobQueue:
                 if job.is_cancelled():
                     job.state = JobState.CANCELLED
                     job.message = "Cancelled"
+                elif getattr(result, "success", True) is False:
+                    # Engine reported failure (wrong password, corrupt archive, ...)
+                    job.result = result
+                    job.state = JobState.FAILED
+                    job.error = getattr(result, "message", "") or "Operation failed"
+                    job.message = f"Failed: {job.error}"[:300]
                 else:
                     job.result = result
                     job.state = JobState.COMPLETED
                     job.progress = 100
-                    job.message = "Completed"
+                    job.message = (getattr(result, "message", "") or "Completed")[:300]
         except Exception as exc:
             logger.exception("Job %s failed", job.id)
             job.state = JobState.FAILED

@@ -24,9 +24,12 @@ def test_independent_packages_basic(sample_files: Path, tmp_path: Path):
 
 
 def test_file_exceeding_limit_is_skipped(tmp_path: Path):
+    import os
+
     big = tmp_path / "big.bin"
-    # 2 MB file
-    big.write_bytes(b"X" * (2 * 1024 * 1024))
+    # 2 MB of incompressible data (compressible data would legitimately fit now,
+    # because packages are sized by *compressed* bytes)
+    big.write_bytes(os.urandom(2 * 1024 * 1024))
     small = tmp_path / "small.txt"
     small.write_text("hi")
 
@@ -58,3 +61,39 @@ def test_actual_size_enforced(tmp_path: Path):
     for pkg in result.packages:
         if pkg.output_path and pkg.output_path.exists() and not pkg.error:
             assert pkg.actual_size <= packager.max_bytes
+
+
+def test_packages_are_packed_by_compressed_size(tmp_path: Path):
+    """Compressible data must fill packages by its COMPRESSED size (far fewer ZIPs),
+    and the prediction must match the real file size closely and never exceed the limit."""
+    import os
+
+    src = tmp_path / "src"
+    src.mkdir()
+    for i in range(40):
+        # 400 KB of repetitive text each = 16 MB source, ~100 KB compressed in total
+        (src / f"log{i}.txt").write_text(("line %d of the log\n" % i) * 20000)
+    (src / "noise.bin").write_bytes(os.urandom(300_000))
+
+    out = tmp_path / "out"
+    out.mkdir()
+    limit = 512 * 1024
+    packager = IndependentZipPackager(max_bytes=limit, ceiling_bytes=limit)
+    result = packager.package([src], out, "p")
+    assert result.success, result.message
+    # by source size this would need >= 32 packages; by compressed size just a couple
+    assert len(result.packages) <= 3, len(result.packages)
+    for pkg in result.packages:
+        assert pkg.actual_size <= limit
+        # prediction is an upper bound that is tight (within 3% + container slack)
+        assert pkg.estimated_size >= pkg.actual_size
+        assert pkg.estimated_size - pkg.actual_size < 0.03 * limit + 2048
+    # every source file is present exactly once across packages
+    import zipfile
+
+    names = []
+    for pkg in result.packages:
+        with zipfile.ZipFile(pkg.output_path) as zf:
+            assert zf.testzip() is None
+            names += [n for n in zf.namelist() if not n.endswith("/")]
+    assert sorted(names) == sorted(p.name for p in src.iterdir())
