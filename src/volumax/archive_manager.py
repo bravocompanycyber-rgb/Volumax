@@ -29,9 +29,9 @@ class ArchiveManager:
     # ---- Inspection -------------------------------------------------------
 
     def list_contents(
-        self, archive: Path, password: str | None = None
+        self, archive: Path, password: str | None = None, detailed: bool = False
     ) -> EngineResult:
-        return self.engine.list_archive(archive, password=password)
+        return self.engine.list_archive(archive, password=password, detailed=detailed)
 
     # ---- Create -----------------------------------------------------------
 
@@ -45,17 +45,11 @@ class ArchiveManager:
         password: str | None = None,
         encrypt_filenames: bool = False,
         volume_size: str | None = None,
+        progress=None,
+        cancel=None,
+        **options,
     ) -> EngineResult:
-        if volume_size:
-            return self.volumes.create_volumes(
-                archive,
-                sources,
-                volume_size=volume_size,
-                format=format,
-                level=level,
-                password=password,
-                encrypt_filenames=encrypt_filenames,
-            )
+        """``options``: preset, solid, threads, smart, dictionary_mb, max_dictionary_mb, pause."""
         return self.engine.create_archive(
             archive,
             sources,
@@ -63,6 +57,10 @@ class ArchiveManager:
             level=level,
             password=password,
             encrypt_filenames=encrypt_filenames,
+            volume_size=volume_size,
+            progress=progress,
+            cancel=cancel,
+            **options,
         )
 
     # ---- Extract ----------------------------------------------------------
@@ -76,6 +74,9 @@ class ArchiveManager:
         selected: Sequence[str] | None = None,
         overwrite: bool = True,
         safe: bool = True,
+        progress=None,
+        cancel=None,
+        pause=None,
     ) -> EngineResult:
         if safe:
             return self.extractor.extract(
@@ -84,6 +85,9 @@ class ArchiveManager:
                 password=password,
                 selected=selected,
                 overwrite=overwrite,
+                progress=progress,
+                cancel=cancel,
+                pause=pause,
             )
         return self.engine.extract_archive(
             archive,
@@ -91,6 +95,9 @@ class ArchiveManager:
             password=password,
             selected_files=selected,
             overwrite=overwrite,
+            progress=progress,
+            cancel=cancel,
+            pause=pause,
         )
 
     # ---- Independent packages ---------------------------------------------
@@ -103,10 +110,20 @@ class ArchiveManager:
         *,
         max_mb: int | None = None,
         base: Path | None = None,
+        progress=None,
+        cancel=None,
     ) -> PackagingResult:
         if max_mb is not None:
             self.packager.max_bytes = max_mb * 1024 * 1024
-        return self.packager.package(sources, output_dir, base_name, base=base)
+            self.packager.ceiling_bytes = max(self.packager.ceiling_bytes, self.packager.max_bytes)
+        result = self.packager.package(
+            sources, output_dir, base_name, base=base, progress=progress, cancel=cancel
+        )
+        if result.skipped:
+            names = ", ".join(p.name for p, _ in result.skipped[:5])
+            more = f" (+{len(result.skipped) - 5} more)" if len(result.skipped) > 5 else ""
+            result.message += f" — {len(result.skipped)} file(s) too large and skipped: {names}{more}"
+        return result
 
     # ---- Integrity --------------------------------------------------------
 
@@ -125,7 +142,14 @@ class ArchiveManager:
         format: str = "7z",
         level: int = 5,
         password: str | None = None,
+        target_password: str | None = None,
+        progress=None,
+        cancel=None,
+        pause=None,
+        **options,
     ) -> EngineResult:
         return self.engine.convert_archive(
-            source, target, format=format, level=level, password=password
+            source, target, format=format, level=level, password=password,
+            target_password=target_password, progress=progress, cancel=cancel,
+            pause=pause, **options,
         )

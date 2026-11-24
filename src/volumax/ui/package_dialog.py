@@ -46,7 +46,8 @@ class IndependentPackageDialog(QWidget):
 
         info = QLabel(
             "Create multiple separate ZIP files. Each ZIP is independently extractable. "
-            "You choose the maximum package size (MB). Actual ZIP size is verified — nothing oversized is kept."
+            "You choose the maximum package size (MB). Packages are filled by their real "
+            "compressed size, and the final ZIP size is verified — nothing oversized is kept."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color: #8b9bb4;")
@@ -98,7 +99,22 @@ class IndependentPackageDialog(QWidget):
         self.btn.setObjectName("gold")
         self.btn.clicked.connect(self._run)
         layout.addWidget(self.btn)
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet("color: #8b9bb4;")
+        layout.addWidget(self.status_lbl)
         layout.addStretch()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        for u in event.mimeData().urls():
+            p = Path(u.toLocalFile())
+            if u.isLocalFile() and p.exists() and p not in self.sources:
+                self.sources.append(p)
+                self.source_list.addItem(str(p))
 
     def _add_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(self, "Select Files")
@@ -133,13 +149,13 @@ class IndependentPackageDialog(QWidget):
         max_mb = self.max_mb.value()
         base = self.base_name.text().strip() or "package"
 
+        sources = list(self.sources)  # snapshot
+        manager = self.manager
+
         def job(progress=None, cancel=None):
-            return self.manager.create_independent_packages(
-                self.sources,
-                Path(out),
-                base,
-                max_mb=max_mb,
+            return manager.create_independent_packages(
+                sources, Path(out), base, max_mb=max_mb, progress=progress, cancel=cancel,
             )
 
         j = get_job_queue().submit("Independent packages", job)
-        QMessageBox.information(self, "Queued", f"Packaging job {j.id} queued.")
+        self.status_lbl.setText(f"Queued as job {j.id} — progress is in the Job Queue.")

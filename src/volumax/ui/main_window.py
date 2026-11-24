@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QSize, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
     QStatusBar,
     QToolBar,
@@ -26,9 +27,10 @@ from PySide6.QtWidgets import (
 
 from ..archive_manager import ArchiveManager
 from ..config import ASSETS_DIR
-from ..jobs import get_job_queue
+from ..jobs import JobState, get_job_queue
 from ..settings import get_settings
 from .archive_browser import ArchiveBrowserPage
+from .convert_dialog import ConvertDialog
 from .create_dialog import CreateArchiveDialog
 from .extract_dialog import ExtractArchiveDialog
 from .package_dialog import IndependentPackageDialog
@@ -216,6 +218,7 @@ NAV_ITEMS = [
     ("Create Archive", "create"),
     ("Extract Archive", "extract"),
     ("Archive Browser", "browser"),
+    ("Convert Archive", "convert"),
     ("Independent Packages", "packages"),
     ("Split Volumes", "volumes"),
     ("Integrity & Checksums", "integrity"),
@@ -225,7 +228,22 @@ NAV_ITEMS = [
 ]
 
 
+_ARCHIVE_SUFFIXES = (
+    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tbz2", ".tbz", ".txz",
+    ".iso", ".cab", ".wim", ".001", ".zipx", ".jar", ".apk", ".arj", ".lzh", ".z",
+)
+
+
+def looks_like_archive(path: Path) -> bool:
+    return path.name.lower().endswith(_ARCHIVE_SUFFIXES)
+
+
 class DashboardPage(QWidget):
+    """Home: quick actions, drop zone and recently opened archives."""
+
+    navigate = Signal(str)          # page key
+    open_requested = Signal(str)    # archive path
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -237,37 +255,62 @@ class DashboardPage(QWidget):
             f"font-size: 28px; font-weight: 700; color: {COLORS['accent_gold']};"
         )
         layout.addWidget(title)
-
         subtitle = QLabel("Professional Archive Management")
         subtitle.setStyleSheet(f"font-size: 15px; color: {COLORS['text_dim']};")
         layout.addWidget(subtitle)
 
-        layout.addSpacing(24)
+        drop = QLabel("Drop an archive here to browse it  ·  drop files or folders anywhere to compress them")
+        drop.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drop.setMinimumHeight(90)
+        drop.setStyleSheet(
+            f"border: 2px dashed {COLORS['border']}; border-radius: 12px; "
+            f"color: {COLORS['text_dim']}; font-size: 14px;"
+        )
+        layout.addWidget(drop)
 
         cards = QHBoxLayout()
-        for label, desc in [
-            ("Create", "Build ZIP, 7Z, TAR archives"),
-            ("Extract", "Safe extraction with protections"),
-            ("Packages", "Independent size-limited ZIPs"),
-            ("Volumes", "Multipart split archives"),
+        for label, desc, key in [
+            ("Create", "7z, ZIP, TAR.XZ/GZ/BZ2 — up to Ultra compression", "create"),
+            ("Extract", "Safe extraction with protections", "extract"),
+            ("Browse", "Open any archive instantly and search it", "browser"),
+            ("Convert", "Re-pack RAR/ZIP into smaller 7z", "convert"),
+            ("Packages", "Independent size-limited ZIPs", "packages"),
+            ("Volumes", "Multipart split archives", "volumes"),
         ]:
-            card = QFrame()
+            card = QPushButton(f"{label}\n{desc}")
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.setMinimumHeight(96)
             card.setStyleSheet(
-                f"background-color: {COLORS['bg_card']}; border-radius: 10px; padding: 16px;"
+                f"QPushButton {{ background-color: {COLORS['bg_card']}; border-radius: 10px; "
+                f"padding: 12px; text-align: left; color: {COLORS['text_dim']}; }}"
+                f"QPushButton:hover {{ background-color: {COLORS['bg_hover']}; "
+                f"color: {COLORS['text']}; }}"
             )
-            card.setFixedHeight(120)
-            cl = QVBoxLayout(card)
-            t = QLabel(label)
-            t.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {COLORS['accent_blue']};")
-            d = QLabel(desc)
-            d.setStyleSheet(f"color: {COLORS['text_dim']};")
-            d.setWordWrap(True)
-            cl.addWidget(t)
-            cl.addWidget(d)
-            cl.addStretch()
+            card.clicked.connect(lambda _c=False, k=key: self.navigate.emit(k))
             cards.addWidget(card)
         layout.addLayout(cards)
+
+        recent_title = QLabel("Recent archives")
+        recent_title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        layout.addWidget(recent_title)
+        self.recent = QListWidget()
+        self.recent.setMaximumHeight(220)
+        self.recent.itemActivated.connect(
+            lambda it: self.open_requested.emit(it.data(Qt.ItemDataRole.UserRole))
+        )
+        self.recent.itemClicked.connect(
+            lambda it: self.open_requested.emit(it.data(Qt.ItemDataRole.UserRole))
+        )
+        layout.addWidget(self.recent)
         layout.addStretch()
+
+    def set_recent(self, paths: list[str]) -> None:
+        self.recent.clear()
+        for path in paths:
+            p = Path(path)
+            item = QListWidgetItem(f"{p.name}    —    {p.parent}")
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            self.recent.addItem(item)
 
 
 class PlaceholderPage(QWidget):
@@ -294,6 +337,8 @@ class MainWindow(QMainWindow):
         self.manager = ArchiveManager()
         self.settings = get_settings()
         self.queue = get_job_queue()
+        self._announced: set[str] = set()
+        self.setAcceptDrops(True)
 
         # Icon
         icon_path = ASSETS_DIR / "logo.ico"
@@ -302,6 +347,10 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self.setStyleSheet(STYLESHEET)
+
+        self._job_timer = QTimer(self)
+        self._job_timer.timeout.connect(self._poll_jobs)
+        self._job_timer.start(400)
 
         # Restore geometry if saved
         geo = self.settings.get("window_geometry")
@@ -339,17 +388,23 @@ class MainWindow(QMainWindow):
         self.pages["create"] = CreateArchiveDialog(self.manager, embedded=True)
         self.pages["extract"] = ExtractArchiveDialog(self.manager, embedded=True)
         self.pages["browser"] = ArchiveBrowserPage(self.manager)
+        self.pages["convert"] = ConvertDialog(self.manager)
         self.pages["packages"] = IndependentPackageDialog(self.manager, embedded=True)
         self.pages["volumes"] = VolumeDialog(self.manager, embedded=True)
         self.pages["integrity"] = IntegrityPage(self.manager)
         self.pages["duplicates"] = DuplicatesPage()
         self.pages["queue"] = QueuePanel(self.queue)
-        self.pages["settings"] = SettingsDialog(self.settings, embedded=True)
+        self.pages["settings"] = SettingsDialog(self.settings, embedded=True, manager=self.manager)
 
         for label, key in NAV_ITEMS:
             self.stack.addWidget(self.pages[key])
 
         self.nav.setCurrentRow(0)
+        dash = self.pages["dashboard"]
+        dash.navigate.connect(self.goto)
+        dash.open_requested.connect(lambda p: self.open_archive(Path(p)))
+        dash.set_recent(self.settings.get("recent_archives", []))
+        self.pages["browser"].opened.connect(self._remember_recent)
 
         # Status bar
         self.status = QStatusBar()
@@ -367,7 +422,7 @@ class MainWindow(QMainWindow):
         tb.addAction(act_open)
 
         act_create = QAction("Quick Create", self)
-        act_create.triggered.connect(lambda: self.nav.setCurrentRow(1))
+        act_create.triggered.connect(lambda: self.goto("create"))
         tb.addAction(act_create)
 
     def _on_nav(self, row: int) -> None:
@@ -382,10 +437,72 @@ class MainWindow(QMainWindow):
             "Archives (*.zip *.7z *.tar *.tar.gz *.tgz *.tar.bz2 *.tar.xz);;All Files (*)",
         )
         if path:
-            self.nav.setCurrentRow(3)  # browser
-            browser = self.pages["browser"]
-            if hasattr(browser, "load_archive"):
-                browser.load_archive(Path(path))
+            self.open_archive(Path(path))
+
+    # ------------------------------------------------------------ navigation
+    def goto(self, key: str) -> None:
+        for row in range(self.nav.count()):
+            if self.nav.item(row).data(Qt.ItemDataRole.UserRole) == key:
+                self.nav.setCurrentRow(row)
+                return
+
+    def open_archive(self, path: Path) -> None:
+        self.goto("browser")
+        self.pages["browser"].load_archive(Path(path))
+
+    def _remember_recent(self, path: str) -> None:
+        recent = [p for p in self.settings.get("recent_archives", []) if p != path]
+        recent.insert(0, path)
+        recent = recent[:10]
+        self.settings.set("recent_archives", recent)
+        self.settings.save()
+        self.pages["dashboard"].set_recent(recent)
+
+    # ------------------------------------------------------------ drag & drop
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
+        if not paths:
+            return
+        if len(paths) == 1 and paths[0].is_file() and looks_like_archive(paths[0]):
+            self.open_archive(paths[0])
+        else:
+            self.goto("create")
+            self.pages["create"].add_sources(paths)
+        event.acceptProposedAction()
+
+    # ----------------------------------------------------- job notifications
+    def _poll_jobs(self) -> None:
+        """Runs on the GUI thread: announce finished jobs and show live progress."""
+        running = None
+        for job in self.queue.list_jobs():
+            if job.state in (JobState.RUNNING, JobState.PAUSED):
+                running = job
+            if job.finished_at and job.id not in self._announced:
+                self._announced.add(job.id)
+                self._announce(job)
+        if running is not None:
+            tag = "paused" if running.is_paused() else f"{running.progress}%"
+            self.setWindowTitle(f"{tag} — {running.name} — VOLUMAX")
+            self.status.showMessage(f"{running.name}: {running.progress}%  {running.message}")
+        else:
+            self.setWindowTitle("VOLUMAX — Professional Archive Manager")
+
+    def _announce(self, job) -> None:
+        if job.state == JobState.COMPLETED:
+            self.status.showMessage(f"✔ {job.message}", 20000)
+        elif job.state == JobState.CANCELLED:
+            self.status.showMessage(f"Cancelled: {job.name}", 10000)
+        elif job.state == JobState.FAILED:
+            extra = getattr(job.result, "extra", None) or {}
+            msg = job.error or job.message
+            if extra.get("needs_password"):
+                msg = "This archive is password-protected, or the password was wrong."
+            self.status.showMessage(f"✖ {job.name} failed", 20000)
+            QMessageBox.warning(self, f"{job.name} failed", str(msg)[:1500])
 
     def closeEvent(self, event) -> None:  # noqa: N802
         try:

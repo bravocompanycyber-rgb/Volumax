@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
-import stat
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 
+from .backends.sevenzip import tar_codec
 from .engine import EngineResult, SevenZipEngine, extract_zip_native
 from .settings import get_settings
 
@@ -41,10 +42,10 @@ class ExtractionSafety:
         allow_symlinks: bool = False,
     ) -> None:
         settings = get_settings()
-        self.max_files = max_files if max_files is not None else settings.get("max_extraction_files", 100_000)
+        self.max_files = max_files if max_files is not None else settings.get("max_extraction_files", 3_000_000)
         self.max_total_size = max_total_size
         if self.max_total_size is None:
-            gb = settings.get("max_extraction_size_gb", 50)
+            gb = settings.get("max_extraction_size_gb", 10_000)
             self.max_total_size = int(gb) * 1024 * 1024 * 1024
         self.allow_absolute = allow_absolute
         self.allow_symlinks = allow_symlinks
@@ -137,10 +138,13 @@ class ExtractionSafety:
             rejected_entries=rejected,
         )
 
-    def safe_destination(self, base: Path, relative: str) -> Path | None:
+    def safe_destination(
+        self, base: Path, relative: str, base_resolved: Path | None = None
+    ) -> Path | None:
         """
         Resolve relative path under base and ensure it stays inside base.
         Returns None if the path would escape.
+        Pass ``base_resolved`` when calling in a loop to avoid re-resolving base.
         """
         # Strip leading separators and drive letters
         cleaned = relative.replace("\\", "/").lstrip("/")
@@ -148,11 +152,13 @@ class ExtractionSafety:
             # Remove drive letter if present
             cleaned = cleaned.split(":", 1)[-1].lstrip("/")
 
-        # Resolve against base
         try:
-            target = (base / cleaned).resolve()
-            base_resolved = base.resolve()
-            if not str(target).startswith(str(base_resolved)):
+            if base_resolved is None:
+                base_resolved = base.resolve()
+            target = (base_resolved / cleaned).resolve()
+            # is_relative_to is component-aware (a plain startswith would let
+            # /data/out-evil pass as inside /data/out)
+            if not target.is_relative_to(base_resolved):
                 return None
             return target
         except (OSError, ValueError):
@@ -175,29 +181,52 @@ class SafeExtractor:
         selected: Sequence[str] | None = None,
         overwrite: bool = True,
         use_staging: bool = True,
+        progress=None,
+        cancel=None,
+        pause=None,
     ) -> EngineResult:
         archive = Path(archive)
         destination = Path(destination)
 
-        # First list contents for safety check
-        list_res = self.engine.list_archive(archive, password=password)
-        if not list_res.success:
-            # Fall back to native ZIP if 7z fails and it is a ZIP
-            if archive.suffix.lower() == ".zip":
-                return self._extract_zip_safe(archive, destination, selected=selected)
-            return list_res
+        # Compressed tars would be decompressed twice (list + extract). Their paths
+        # are re-validated file-by-file after staging instead, so skip the pre-list.
+        if tar_codec(archive):
+            list_res = None
+        else:
+            list_res = self.engine.list_archive(archive, password=password)
+            if not list_res.success:
+                # Native ZIP fallback only for real read errors, not for missing passwords
+                if archive.suffix.lower() == ".zip" and not list_res.extra.get("needs_password"):
+                    return self._extract_zip_safe(archive, destination, selected=selected)
+                return list_res
 
-        report = self.safety.validate_entries(list_res.entries)
-        if not report.safe:
-            msg = "Safety check failed:\n" + "\n".join(report.reasons[:20])
-            if len(report.reasons) > 20:
-                msg += f"\n... and {len(report.reasons) - 20} more"
-            logger.warning(msg)
-            return EngineResult(False, msg)
+            report = self.safety.validate_entries(list_res.entries)
+            if not report.safe:
+                msg = "Safety check failed:\n" + "\n".join(report.reasons[:20])
+                if len(report.reasons) > 20:
+                    msg += f"\n... and {len(report.reasons) - 20} more"
+                logger.warning(msg)
+                return EngineResult(False, msg)
+
+            need = sum(max(e.size, 0) for e in list_res.entries if not e.is_dir)
+            try:
+                probe = destination if destination.exists() else destination.parent
+                while not probe.exists() and probe != probe.parent:
+                    probe = probe.parent
+                free = shutil.disk_usage(probe).free
+                if need > free:
+                    return EngineResult(
+                        False,
+                        f"Not enough disk space: need {need / 1048576:.0f} MB, "
+                        f"only {free / 1048576:.0f} MB free on the destination drive.",
+                    )
+            except OSError:
+                pass
 
         if use_staging:
             return self._extract_via_staging(
-                archive, destination, password=password, selected=selected, overwrite=overwrite
+                archive, destination, password=password, selected=selected,
+                overwrite=overwrite, progress=progress, cancel=cancel, pause=pause,
             )
 
         return self.engine.extract_archive(
@@ -206,6 +235,9 @@ class SafeExtractor:
             password=password,
             selected_files=selected,
             overwrite=overwrite,
+            progress=progress,
+            cancel=cancel,
+            pause=pause,
         )
 
     def _extract_via_staging(
@@ -216,8 +248,19 @@ class SafeExtractor:
         password: str | None,
         selected: Sequence[str] | None,
         overwrite: bool,
+        progress=None,
+        cancel=None,
+        pause=None,
     ) -> EngineResult:
-        with tempfile.TemporaryDirectory(prefix="volumax_stage_") as tmp:
+        destination.mkdir(parents=True, exist_ok=True)
+        # Stage INSIDE the destination so the final move is a same-volume
+        # rename (instant) instead of a full copy across drives.
+        try:
+            tmp_ctx = tempfile.TemporaryDirectory(prefix=".volumax_stage_", dir=destination)
+        except OSError:
+            tmp_ctx = tempfile.TemporaryDirectory(prefix="volumax_stage_")
+
+        with tmp_ctx as tmp:
             stage = Path(tmp)
             res = self.engine.extract_archive(
                 archive,
@@ -225,30 +268,38 @@ class SafeExtractor:
                 password=password,
                 selected_files=selected,
                 overwrite=True,
+                progress=progress,
+                cancel=cancel,
+                pause=pause,
             )
             if not res.success:
                 return res
 
-            # Move files from stage to destination with final path checks
+            base_resolved = destination.resolve()
+            made_dirs: set[Path] = set()
             moved = 0
-            for root, dirs, files in os.walk(stage):
+            for root, _dirs, files in os.walk(stage):
                 rel_root = Path(root).relative_to(stage)
                 for name in files:
                     rel = str(rel_root / name).replace("\\", "/")
-                    target = self.safety.safe_destination(destination, rel)
+                    target = self.safety.safe_destination(destination, rel, base_resolved)
                     if target is None:
                         logger.warning("Skipping unsafe path after staging: %s", rel)
                         continue
-                    target.parent.mkdir(parents=True, exist_ok=True)
+                    parent = target.parent
+                    if parent not in made_dirs:
+                        parent.mkdir(parents=True, exist_ok=True)
+                        made_dirs.add(parent)
+                    if not overwrite and target.exists():
+                        continue
                     src = Path(root) / name
-                    if target.exists() and not overwrite:
+                    if src.is_symlink() and not self.safety.allow_symlinks:
+                        logger.warning("Skipping symlink from archive: %s", rel)
                         continue
                     try:
-                        # Prefer rename for speed; fall back to copy
                         try:
-                            src.replace(target)
+                            src.replace(target)  # same volume: instant
                         except OSError:
-                            import shutil
                             shutil.copy2(src, target)
                         moved += 1
                     except OSError as exc:
@@ -282,7 +333,7 @@ class SafeExtractor:
                         continue
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with zf.open(info) as src, open(target, "wb") as dst:
-                        dst.write(src.read())
+                        shutil.copyfileobj(src, dst, 1024 * 1024)
             return EngineResult(True, "ZIP extracted safely")
         except Exception as exc:
             return EngineResult(False, str(exc))

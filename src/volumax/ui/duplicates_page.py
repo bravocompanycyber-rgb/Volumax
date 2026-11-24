@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..duplicate_finder import DuplicateFinder
+from .widgets.workers import run_in_background
 
 
 class DuplicatesPage(QWidget):
@@ -33,7 +34,7 @@ class DuplicatesPage(QWidget):
         btn_browse = QPushButton("Browse")
         btn_browse.setObjectName("secondary")
         btn_browse.clicked.connect(self._browse)
-        btn_scan = QPushButton("Scan")
+        self.btn_scan = btn_scan = QPushButton("Scan")
         btn_scan.setObjectName("gold")
         btn_scan.clicked.connect(self._scan)
         row.addWidget(self.root_edit, 1)
@@ -59,23 +60,33 @@ class DuplicatesPage(QWidget):
         if not root or not Path(root).is_dir():
             QMessageBox.warning(self, "Missing", "Select a valid folder.")
             return
-        self.status.setText("Scanning…")
+        self.btn_scan.setEnabled(False)
+        self.status.setText("Scanning… (the window stays responsive)")
         self.table.setRowCount(0)
+
+        def work():
+            return DuplicateFinder().scan([Path(root)])
+
+        self._task = run_in_background(work, self._on_scan_done, self._on_scan_failed)
+
+    def _on_scan_done(self, groups) -> None:
+        self.btn_scan.setEnabled(True)
+        self.table.setUpdatesEnabled(False)
         try:
-            finder = DuplicateFinder()
-            groups = finder.scan([Path(root)])
-            for g in groups:
-                row = self.table.rowCount()
-                self.table.insertRow(row)
+            self.table.setRowCount(len(groups))
+            for row, g in enumerate(groups):
                 self.table.setItem(row, 0, QTableWidgetItem(g.hash[:16] + "…"))
                 self.table.setItem(row, 1, QTableWidgetItem(str(g.size)))
-                paths = "\n".join(str(p) for p in g.paths)
-                self.table.setItem(row, 2, QTableWidgetItem(paths))
-            wasted = sum(g.wasted_bytes for g in groups)
-            self.status.setText(
-                f"Found {len(groups)} duplicate group(s). "
-                f"Reclaimable ≈ {wasted / (1024*1024):.2f} MB"
-            )
-        except Exception as exc:
-            self.status.setText(f"Error: {exc}")
-            QMessageBox.critical(self, "Scan failed", str(exc))
+                self.table.setItem(row, 2, QTableWidgetItem("\n".join(str(p) for p in g.paths)))
+        finally:
+            self.table.setUpdatesEnabled(True)
+        wasted = sum(g.wasted_bytes for g in groups)
+        self.status.setText(
+            f"Found {len(groups)} duplicate group(s). "
+            f"Reclaimable ≈ {wasted / (1024*1024):.2f} MB"
+        )
+
+    def _on_scan_failed(self, message: str) -> None:
+        self.btn_scan.setEnabled(True)
+        self.status.setText(f"Error: {message}")
+        QMessageBox.critical(self, "Scan failed", message)
