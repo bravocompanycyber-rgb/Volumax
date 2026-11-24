@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 
+from .compat import is_relative_to
 from .backends.sevenzip import tar_codec
 from .engine import EngineResult, SevenZipEngine, extract_zip_native
 from .settings import get_settings
@@ -158,7 +159,7 @@ class ExtractionSafety:
             target = (base_resolved / cleaned).resolve()
             # is_relative_to is component-aware (a plain startswith would let
             # /data/out-evil pass as inside /data/out)
-            if not target.is_relative_to(base_resolved):
+            if not is_relative_to(target, base_resolved):
                 return None
             return target
         except (OSError, ValueError):

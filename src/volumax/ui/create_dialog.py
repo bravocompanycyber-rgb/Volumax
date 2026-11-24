@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import is_relative_to
 from ..archive_manager import ArchiveManager
 from ..compression import PRESETS, analyze_sources, plan_compression
 from ..jobs import get_job_queue
@@ -330,7 +331,7 @@ class CreateArchiveDialog(QWidget):
             )
             if ans != QMessageBox.StandardButton.Yes:
                 return
-        if any(archive == s or archive.is_relative_to(s) for s in self.sources if s.is_dir()):
+        if any(archive == s or is_relative_to(archive, s) for s in self.sources if s.is_dir()):
             QMessageBox.warning(
                 self, "Output inside source",
                 "The archive would be created inside a folder you are archiving. "

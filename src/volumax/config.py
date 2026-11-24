@@ -31,6 +31,11 @@ def _resolve_user_dir() -> Path:
     override = os.environ.get("VOLUMAX_HOME")
     if override:
         return Path(override)
+    # Portable mode: a file named "portable.flag" next to the program keeps settings
+    # and logs in a "data" folder beside it (nothing is written to the user profile).
+    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
+    if exe_dir is not None and (exe_dir / "portable.flag").is_file():
+        return exe_dir / "data"
     if os.name == "nt":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
         return Path(base) / "VOLUMAX"
