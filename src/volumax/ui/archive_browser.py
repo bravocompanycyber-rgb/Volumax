@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import safe_exists, safe_is_file
 from ..archive_manager import ArchiveManager
 from ..jobs import get_job_queue
 from ..listing import ArchiveTree, clear_cache, load_tree
@@ -95,7 +96,7 @@ class ArchiveBrowserPage(QWidget):
         self.btn_up.setObjectName("secondary")
         self.btn_up.clicked.connect(self._go_up)
         self.location = QLabel("")
-        self.location.setStyleSheet("color: #8b9bb4;")
+        self.location.setStyleSheet("color: #a9b6cb;")
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search in archive…  (Ctrl+F)")
         self.search.setClearButtonEnabled(True)
@@ -183,7 +184,7 @@ class ArchiveBrowserPage(QWidget):
         if not path_str:
             return
         path = Path(path_str)
-        if not path.is_file():
+        if not safe_is_file(path):
             QMessageBox.warning(self, "Not found", f"File not found:\n{path}")
             return
         self.current = path
@@ -392,7 +393,7 @@ class ArchiveBrowserPage(QWidget):
 
         def done(res) -> None:
             target = Path(tmp) / name
-            if res.success and target.exists():
+            if res.success and safe_exists(target):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
                 self.status_lbl.setText(f"Opened {target.name}")
             else:

@@ -32,3 +32,35 @@ def file_digest(fileobj: BinaryIO, algorithm: str, bufsize: int = 4 * 1024 * 102
             break
         h.update(view[:n])
     return h.hexdigest()
+
+
+ARCHIVE_SUFFIXES = (
+    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tbz2", ".tbz", ".txz",
+    ".iso", ".cab", ".wim", ".001", ".zipx", ".jar", ".apk", ".arj", ".lzh", ".z",
+)
+
+
+def looks_like_archive(path) -> bool:
+    return path.name.lower().endswith(ARCHIVE_SUFFIXES)
+
+
+def safe_is_file(p) -> bool:
+    """Path.is_file() that never raises (too-long names, NUL, odd devices -> False)."""
+    try:
+        return bool(p.is_file())
+    except (OSError, ValueError):
+        return False
+
+
+def safe_is_dir(p) -> bool:
+    try:
+        return bool(p.is_dir())
+    except (OSError, ValueError):
+        return False
+
+
+def safe_exists(p) -> bool:
+    try:
+        return bool(p.exists())
+    except (OSError, ValueError):
+        return False

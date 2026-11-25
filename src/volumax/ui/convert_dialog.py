@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import safe_exists, safe_is_file
 from ..archive_manager import ArchiveManager
 from ..compression import PRESETS
 from ..jobs import get_job_queue
@@ -58,7 +59,7 @@ class ConvertDialog(QWidget):
             "file). The original is never modified."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #8b9bb4;")
+        info.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(info)
 
         box = QGroupBox("Conversion")
@@ -111,7 +112,7 @@ class ConvertDialog(QWidget):
         self.btn.clicked.connect(self._run)
         layout.addWidget(self.btn)
         self.status = QLabel("")
-        self.status.setStyleSheet("color: #8b9bb4;")
+        self.status.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(self.status)
         layout.addStretch()
         self._on_format(self.fmt.currentText())
@@ -152,7 +153,7 @@ class ConvertDialog(QWidget):
     def _run(self) -> None:
         src = Path(self.src_edit.text().strip())
         tgt = Path(self.tgt_edit.text().strip())
-        if not src.is_file():
+        if not safe_is_file(src):
             QMessageBox.warning(self, "Missing source", "Choose a valid source archive.")
             return
         if not self.tgt_edit.text().strip():
@@ -161,7 +162,7 @@ class ConvertDialog(QWidget):
         if tgt.resolve() == src.resolve():
             QMessageBox.warning(self, "Same file", "The output must differ from the source.")
             return
-        if tgt.exists() and QMessageBox.question(
+        if safe_exists(tgt) and QMessageBox.question(
             self, "Replace file?", f"{tgt.name} already exists. Replace it?"
         ) != QMessageBox.StandardButton.Yes:
             return

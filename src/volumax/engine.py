@@ -30,10 +30,19 @@ class SevenZipEngine:
     def exe(self) -> Path:
         return self._backend.exe
 
+    @property
+    def available(self) -> bool:
+        return self._backend.ensure_engine()
+
+    def set_exe(self, path: Path) -> None:
+        self._backend.set_exe(path)
+
     def version(self) -> str:
         """First line of 7-Zip's banner, e.g. '7-Zip 23.01 (x64) : Copyright ...'."""
         import subprocess
 
+        if not self._backend.ensure_engine():
+            return "not found"
         try:
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             out = subprocess.run(

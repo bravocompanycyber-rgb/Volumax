@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QStatusBar,
     QToolBar,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..archive_manager import ArchiveManager
+from ..compat import looks_like_archive, safe_exists  # noqa: F401  (looks_like_archive is re-exported)
 from ..config import ASSETS_DIR
 from ..jobs import JobState, get_job_queue
 from ..settings import get_settings
@@ -39,6 +42,8 @@ from .settings_dialog import SettingsDialog
 from .integrity_page import IntegrityPage
 from .duplicates_page import DuplicatesPage
 from .volume_dialog import VolumeDialog
+from .tools_page import ToolsPage
+from .diagnostics_page import DiagnosticsPage
 
 logger = logging.getLogger("volumax.ui.main")
 
@@ -53,11 +58,14 @@ COLORS = {
     "bg_hover": "#2d3a50",
     "border": "#2a3548",
     "text": "#e8eef7",
-    "text_dim": "#8b9bb4",
-    "accent_blue": "#3b82f6",
+    "text_dim": "#a9b6cb",
+    "accent_blue": "#2563eb",
+    "accent_blue_hover": "#1d4ed8",
+    "link": "#7db4ff",
     "accent_gold": "#d4a017",
     "success": "#22c55e",
-    "danger": "#ef4444",
+    "danger": "#fca5a5",
+    "danger_fill": "#b91c1c",
     "warning": "#f59e0b",
 }
 
@@ -125,7 +133,7 @@ QPushButton {{
     font-weight: 600;
 }}
 QPushButton:hover {{
-    background-color: #2563eb;
+    background-color: {COLORS["accent_blue_hover"]};
 }}
 QPushButton:disabled {{
     background-color: {COLORS["bg_hover"]};
@@ -143,7 +151,7 @@ QPushButton#gold {{
     color: #1a1a1a;
 }}
 QPushButton#danger {{
-    background-color: {COLORS["danger"]};
+    background-color: {COLORS["danger_fill"]};
 }}
 QLineEdit, QSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
     background-color: {COLORS["bg_card"]};
@@ -180,6 +188,39 @@ QProgressBar {{
 QProgressBar::chunk {{
     background-color: {COLORS["accent_blue"]};
     border-radius: 4px;
+}}
+QTabWidget::pane {{
+    border: 1px solid {COLORS["border"]};
+    border-radius: 8px;
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: {COLORS["bg_panel"]};
+    color: {COLORS["text_dim"]};
+    padding: 8px 16px;
+    margin-right: 2px;
+    border: 1px solid {COLORS["border"]};
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}}
+QTabBar::tab:hover {{
+    background-color: {COLORS["bg_hover"]};
+    color: {COLORS["text"]};
+}}
+QTabBar::tab:selected {{
+    background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    border-bottom: 3px solid {COLORS["accent_gold"]};
+    font-weight: 600;
+}}
+QHeaderView::section {{
+    background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    padding: 6px 8px;
+    border: none;
+    border-right: 1px solid {COLORS["border"]};
+    font-weight: 600;
 }}
 QScrollBar:vertical {{
     background: {COLORS["bg_panel"]};
@@ -224,18 +265,10 @@ NAV_ITEMS = [
     ("Integrity & Checksums", "integrity"),
     ("Duplicate Finder", "duplicates"),
     ("Job Queue", "queue"),
+    ("Tools", "tools"),
+    ("Diagnostics", "diagnostics"),
     ("Settings", "settings"),
 ]
-
-
-_ARCHIVE_SUFFIXES = (
-    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tbz2", ".tbz", ".txz",
-    ".iso", ".cab", ".wim", ".001", ".zipx", ".jar", ".apk", ".arj", ".lzh", ".z",
-)
-
-
-def looks_like_archive(path: Path) -> bool:
-    return path.name.lower().endswith(_ARCHIVE_SUFFIXES)
 
 
 class DashboardPage(QWidget):
@@ -268,26 +301,37 @@ class DashboardPage(QWidget):
         )
         layout.addWidget(drop)
 
-        cards = QHBoxLayout()
-        for label, desc, key in [
+        cards = QGridLayout()
+        cards.setSpacing(12)
+        for i, (label, desc, key) in enumerate([
             ("Create", "7z, ZIP, TAR.XZ/GZ/BZ2 — up to Ultra compression", "create"),
             ("Extract", "Safe extraction with protections", "extract"),
             ("Browse", "Open any archive instantly and search it", "browser"),
             ("Convert", "Re-pack RAR/ZIP into smaller 7z", "convert"),
             ("Packages", "Independent size-limited ZIPs", "packages"),
             ("Volumes", "Multipart split archives", "volumes"),
-        ]:
-            card = QPushButton(f"{label}\n{desc}")
+        ]):
+            card = QPushButton()
             card.setCursor(Qt.CursorShape.PointingHandCursor)
-            card.setMinimumHeight(96)
+            card.setMinimumHeight(88)
+            card.setAccessibleName(f"{label}: {desc}")
             card.setStyleSheet(
-                f"QPushButton {{ background-color: {COLORS['bg_card']}; border-radius: 10px; "
-                f"padding: 12px; text-align: left; color: {COLORS['text_dim']}; }}"
-                f"QPushButton:hover {{ background-color: {COLORS['bg_hover']}; "
-                f"color: {COLORS['text']}; }}"
+                f"QPushButton {{ background-color: {COLORS['bg_card']}; border-radius: 10px; }}"
+                f"QPushButton:hover {{ background-color: {COLORS['bg_hover']}; }}"
             )
+            inner = QVBoxLayout(card)
+            inner.setContentsMargins(14, 10, 14, 10)
+            head = QLabel(label)
+            head.setStyleSheet(f"background: transparent; font-weight: 700; font-size: 14px; color: {COLORS['text']};")
+            body = QLabel(desc)
+            body.setWordWrap(True)
+            body.setStyleSheet(f"background: transparent; color: {COLORS['text_dim']}; font-weight: 400;")
+            for lbl in (head, body):
+                lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                inner.addWidget(lbl)
+            inner.addStretch()
             card.clicked.connect(lambda _c=False, k=key: self.navigate.emit(k))
-            cards.addWidget(card)
+            cards.addWidget(card, i // 3, i % 3)
         layout.addLayout(cards)
 
         recent_title = QLabel("Recent archives")
@@ -306,6 +350,10 @@ class DashboardPage(QWidget):
 
     def set_recent(self, paths: list[str]) -> None:
         self.recent.clear()
+        if not paths:
+            hint = QListWidgetItem("No recent archives yet — open one with the button above, or drop it here.")
+            hint.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.recent.addItem(hint)
         for path in paths:
             p = Path(path)
             item = QListWidgetItem(f"{p.name}    —    {p.parent}")
@@ -342,7 +390,7 @@ class MainWindow(QMainWindow):
 
         # Icon
         icon_path = ASSETS_DIR / "logo.ico"
-        if icon_path.exists():
+        if safe_exists(icon_path):
             self.setWindowIcon(QIcon(str(icon_path)))
 
         self._build_ui()
@@ -394,10 +442,18 @@ class MainWindow(QMainWindow):
         self.pages["integrity"] = IntegrityPage(self.manager)
         self.pages["duplicates"] = DuplicatesPage()
         self.pages["queue"] = QueuePanel(self.queue)
+        self.pages["tools"] = ToolsPage(self.manager)
+        self.pages["diagnostics"] = DiagnosticsPage(self.manager)
         self.pages["settings"] = SettingsDialog(self.settings, embedded=True, manager=self.manager)
 
         for label, key in NAV_ITEMS:
-            self.stack.addWidget(self.pages[key])
+            # Scroll wrapper: a page never gets squashed below its natural size
+            # (controls stay readable on small windows / high DPI scaling).
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setWidget(self.pages[key])
+            self.stack.addWidget(scroll)
 
         self.nav.setCurrentRow(0)
         dash = self.pages["dashboard"]
@@ -409,7 +465,11 @@ class MainWindow(QMainWindow):
         # Status bar
         self.status = QStatusBar()
         self.setStatusBar(self.status)
-        self.status.showMessage("Ready")
+        if self.manager.engine.available:
+            self.status.showMessage("Ready")
+        else:
+            self.status.showMessage("7-Zip engine not found — open Diagnostics and press Repair")
+            QTimer.singleShot(400, lambda: self.goto("diagnostics"))
 
         # Toolbar
         tb = QToolBar("Main")
@@ -448,6 +508,7 @@ class MainWindow(QMainWindow):
 
     def open_archive(self, path: Path) -> None:
         self.goto("browser")
+        self.pages["tools"].set_archive(Path(path))
         self.pages["browser"].load_archive(Path(path))
 
     def _remember_recent(self, path: str) -> None:
@@ -502,7 +563,25 @@ class MainWindow(QMainWindow):
             if extra.get("needs_password"):
                 msg = "This archive is password-protected, or the password was wrong."
             self.status.showMessage(f"✖ {job.name} failed", 20000)
-            QMessageBox.warning(self, f"{job.name} failed", str(msg)[:1500])
+            self._notify_failure(job.name, str(msg))
+
+    def _notify_failure(self, name: str, msg: str) -> None:
+        """ONE non-blocking notice at a time. A blocking dialog inside the poll timer
+        re-enters it and stacks a dialog per failed job (a failed batch of 20 = 20 modals)."""
+        box = getattr(self, "_fail_box", None)
+        try:
+            if box is not None and box.isVisible():
+                self._fail_more = getattr(self, "_fail_more", 0) + 1
+                box.setInformativeText(f"+{self._fail_more} more failed — details are in the Job Queue.")
+                return
+        except RuntimeError:  # the previous box was already deleted
+            pass
+        self._fail_more = 0
+        box = QMessageBox(QMessageBox.Icon.Warning, f"{name} failed", msg[:1500],
+                          QMessageBox.StandardButton.Ok, self)
+        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._fail_box = box
+        box.open()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         try:

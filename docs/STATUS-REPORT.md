@@ -136,3 +136,37 @@ JobQueue        →  background workers for long ops
 Settings        →  persistent JSON
 UI (PySide6)    →  pages bind to ArchiveManager + JobQueue
 ```
+
+
+---
+# v1.2.0 verification (what was actually run)
+
+| Area | Result |
+|---|---|
+| Automated tests, Python 3.13 + PySide6 6.12 | 132 passed, 2 skipped |
+| Automated tests, Python 3.8 + PySide2 5.15 (Windows 8 stack) | 132 passed, 2 skipped |
+| Read-only-destination test (needs non-root) | passed when run as an unprivileged user |
+| Frozen builds (PyInstaller 6 modern / 5.13 legacy), `--selftest` | all 8 checks OK on both |
+| Contrast (WCAG AA 4.5:1) for every text/background pair and button | enforced by tests |
+| UI rendered at 1100x720 and 860x560, every page | no clipped/hidden controls after fixes |
+
+Bugs found by the simulation and fixed: stacked modal dialogs on failed batches; extraction limits not
+live; unhandled errors on over-long/invalid typed paths; Python 3.8 `write_text(newline=)`; destructive
+overwrite of an existing archive when a new run failed; startup crash when 7-Zip was missing.
+
+## Small-file dictionary pack - measured, not assumed
+Zstandard-19 per file, dictionary size included, synthetic web-log corpus:
+
+| Files | dictionary gain vs plain per-file zstd | solid 7z -mx9 (for reference) |
+|---|---|---|
+| 50 (150 KB) | -76% (worse) | 14 KB (pack: ~51 KB) |
+| 500 | +12% | 119 KB |
+| 3000 | +44% | 678 KB (dictionary pack ~921 KB) |
+
+Conclusion: the dictionary only pays off at thousands of files, and a normal solid 7z archive is smaller
+in every case. The app therefore uses the dictionary automatically only when it saves >= 20%, and presents the
+pack as a *random-access* tool, not a ratio winner.
+
+## NOT verified here (no Windows machine / Inno Setup in the build sandbox)
+- Compiling the Inno Setup installers, running on real Windows 8 / 10 / 11, Authenticode signing
+  (unsigned installers will trigger SmartScreen until signed). First run of BUILD-ALL.cmd on your PC is the real test.

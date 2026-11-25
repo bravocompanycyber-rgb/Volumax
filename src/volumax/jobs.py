@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable
 
+from .selfheal import explain
+
 logger = logging.getLogger("volumax.jobs")
 
 
@@ -191,7 +193,8 @@ class JobQueue:
                     job.result = result
                     job.state = JobState.FAILED
                     job.error = getattr(result, "message", "") or "Operation failed"
-                    job.message = f"Failed: {job.error}"[:300]
+                    hint = explain(job.error)
+                    job.message = (f"Failed: {hint}" if hint else f"Failed: {job.error}")[:300]
                 else:
                     job.result = result
                     job.state = JobState.COMPLETED
@@ -201,7 +204,7 @@ class JobQueue:
             logger.exception("Job %s failed", job.id)
             job.state = JobState.FAILED
             job.error = str(exc)
-            job.message = f"Failed: {exc}"
+            job.message = f"Failed: {explain(job.error) or exc}"[:300]
         finally:
             job.finished_at = time.time()
             self._notify(job)

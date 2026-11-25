@@ -18,21 +18,22 @@ APP_USER_MODEL_ID = "BravoProjects.VOLUMAX"
 
 
 def _install_excepthook() -> None:
-    """Log every unhandled exception and show it instead of dying silently."""
+    """Crash reports + friendly dialog; the app keeps running after a stray exception."""
     from PySide6.QtWidgets import QMessageBox
 
-    def hook(exc_type, exc, tb) -> None:
-        text = "".join(traceback.format_exception(exc_type, exc, tb))
-        logger.critical("Unhandled exception:\n%s", text)
-        try:
-            box = QMessageBox(QMessageBox.Icon.Critical, "VOLUMAX — unexpected error",
-                              f"{exc_type.__name__}: {exc}")
-            box.setDetailedText(text)
-            box.exec()
-        except Exception:
-            pass
+    from .selfheal import install_crash_handlers
 
-    sys.excepthook = hook
+    def show(title: str, text: str) -> None:
+        # Only show from the GUI thread; worker-thread errors are logged + reported.
+        from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None or QThread.currentThread() is not app.thread():
+            return
+        QMessageBox(QMessageBox.Icon.Warning, title, text).exec()
+
+    install_crash_handlers(show)
 
 
 def _prepare_platform() -> None:

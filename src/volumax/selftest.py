@@ -106,6 +106,60 @@ def run(report_path: str) -> int:
     ok.append(_check(checks, "archive_roundtrip", roundtrip))
     ok.append(_check(checks, "main_window", gui))
 
+    def health():
+        from . import selfheal
+
+        bad = [c.name for c in selfheal.run_checks() if not c.ok and not c.warn]
+        if bad:
+            raise RuntimeError("health checks failed: " + ", ".join(bad))
+        return "engine/settings/folders healthy"
+
+    def extras_check():
+        from . import extras
+        from .archive_manager import ArchiveManager
+
+        mgr = ArchiveManager()
+        with tempfile.TemporaryDirectory(prefix="volumax_selftest_") as tmp:
+            t = Path(tmp)
+            (t / "d").mkdir()
+            (t / "d" / "n.txt").write_text("preview me " * 50)
+            arc = t / "e.zip"
+            if not mgr.create(arc, [t / "d"], format="zip").success:
+                raise RuntimeError("create failed")
+            ok_, note = extras.verify_created(mgr, arc, sidecar=True)
+            if not ok_ or not extras.verify_sha256_sidecar(arc)[0]:
+                raise RuntimeError(f"verify/checksum: {note}")
+            member = next(e.path for e in mgr.list_contents(arc).entries if e.path.endswith("n.txt"))
+            pv = extras.preview_member(mgr, arc, member)
+            try:
+                if pv.kind != "text" or "preview me" not in pv.text:
+                    raise RuntimeError(f"preview: {pv.kind} {pv.text[:60]}")
+            finally:
+                pv.cleanup()
+            if not extras.compare_archives(mgr, arc, arc).identical:
+                raise RuntimeError("compare")
+        return "verify, checksum, preview, compare"
+
+    def smallpack_check():
+        from . import smallpack
+
+        if not smallpack.available():
+            return "skipped (optional 'zstandard' not installed)"
+        with tempfile.TemporaryDirectory(prefix="volumax_selftest_") as tmp:
+            t = Path(tmp)
+            (t / "s").mkdir()
+            for i in range(20):
+                (t / "s" / f"{i}.log").write_text(f"line {i} " * 40)
+            r = smallpack.create_pack([t / "s"], t / "p.vxsp")
+            e = smallpack.extract_pack(t / "p.vxsp", t / "o")
+            if not (r.success and e.success and (t / "o" / "s" / "7.log").is_file()):
+                raise RuntimeError(f"{r.message} / {e.message}")
+        return "zstandard small-file pack round-trip"
+
+    ok.append(_check(checks, "health", health))
+    ok.append(_check(checks, "extras", extras_check))
+    ok.append(_check(checks, "smallpack", smallpack_check))
+
     report = {
         "ok": all(ok),
         "version": __version__,

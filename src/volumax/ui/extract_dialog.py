@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import safe_is_file
 from ..archive_manager import ArchiveManager
 from ..jobs import get_job_queue
 from ..settings import get_settings
@@ -55,7 +56,7 @@ class ExtractArchiveDialog(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         layout.addWidget(title)
 
-        form_group = QGroupBox("Archive & Destination  (drop an archive here)")
+        form_group = QGroupBox("Archive && Destination  (drop an archive here)")
         form = QFormLayout(form_group)
 
         self.archive_edit = QLineEdit()
@@ -87,7 +88,7 @@ class ExtractArchiveDialog(QWidget):
         self.subfolder_check.setToolTip("Keeps a messy archive from spilling hundreds of files into your folder.")
         form.addRow("", self.subfolder_check)
 
-        self.safe_check = QCheckBox("Safe extraction (path traversal, symlink & bomb protection)")
+        self.safe_check = QCheckBox("Safe extraction (path traversal, symlink && bomb protection)")
         self.safe_check.setChecked(bool(self.settings.safe_extraction))
         form.addRow("", self.safe_check)
 
@@ -105,7 +106,7 @@ class ExtractArchiveDialog(QWidget):
         self.btn_extract.clicked.connect(self._extract)
         layout.addWidget(self.btn_extract)
         self.status = QLabel("")
-        self.status.setStyleSheet("color: #8b9bb4;")
+        self.status.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(self.status)
         layout.addStretch()
 
@@ -147,7 +148,7 @@ class ExtractArchiveDialog(QWidget):
     def _extract(self) -> None:
         arch = Path(self.archive_edit.text().strip())
         dest_text = self.dest_edit.text().strip()
-        if not arch.is_file():
+        if not safe_is_file(arch):
             QMessageBox.warning(self, "Missing archive", "Select a valid archive file.")
             return
         if not dest_text:

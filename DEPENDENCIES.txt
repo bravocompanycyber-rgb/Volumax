@@ -1,0 +1,90 @@
+VOLUMAX 1.2.0 - DEPENDENCIES AND HOW TO INSTALL THEM
+=====================================================
+
+1) JUST USING VOLUMAX (installer or portable ZIP)
+-------------------------------------------------
+You need NOTHING extra. The installers bundle Python, Qt, the 7-Zip engine and
+the optional Zstandard library. Pick the right file:
+
+  VOLUMAX-1.2.0-Setup-Modern-...     Windows 10 (1809 or newer) and Windows 11
+  VOLUMAX-1.2.0-Setup-Legacy-...     Windows 8, 8.1 (and Windows 7 SP1)
+
+Only if a very old, never-updated Windows says "api-ms-win-crt-... is missing":
+  - Windows 7 / 8 / 8.1: install Microsoft update KB2999226 (Universal C Runtime)
+    via Windows Update.
+Only if Windows says "VCRUNTIME140.dll / MSVCP140.dll was not found":
+  - Install "Microsoft Visual C++ 2015-2022 Redistributable (x64)":
+    https://aka.ms/vs/17/release/vc_redist.x64.exe   (x86: vc_redist.x86.exe)
+
+If the 7-Zip engine is ever damaged or deleted:
+  VOLUMAX -> Diagnostics -> Repair, or "Locate 7z.exe..." to point at any 7-Zip.
+  (Reinstalling VOLUMAX also restores it.)
+
+
+2) RUNNING FROM SOURCE (developers)
+-----------------------------------
+Modern stack (Windows 10/11, Python 3.10-3.13, 3.12 preferred):
+    py -3.12 -m pip install -r requirements\modern.txt
+Legacy stack (Windows 8/8.1, Python 3.8 ONLY - Qt 6 does not run on Windows 8):
+    py -3.8  -m pip install -r requirements\legacy.txt
+Start it:
+    set PYTHONPATH=src
+    python -m volumax
+7-Zip itself: put 7z.exe + 7z.dll in engines\7zip\ , or install 7-Zip, or set the
+VOLUMAX_7Z environment variable to the full path of 7z.exe.
+
+
+3) PACKAGES, WHAT EACH ONE DOES, AND WHAT HAPPENS WITHOUT IT
+------------------------------------------------------------
+  PySide6-Essentials / PySide2   REQUIRED  The window and buttons (Qt).
+  7-Zip (7z.exe, 7z.dll)         REQUIRED  The compression engine. Bundled.
+                                           If missing the app still opens and
+                                           Diagnostics tells you how to fix it.
+  psutil                         optional  Reads free memory so the compressor
+                                           never picks a dictionary too big for
+                                           your PC. Without it: safe defaults.
+                                           It does NOT scan disks, start services
+                                           or touch the registry.
+                                           Install:  pip install psutil
+  zstandard                      optional  Tools -> Small-file Pack (.vxsp).
+                                           Without it only that one tab is
+                                           disabled and says how to install.
+                                           Install:  pip install zstandard
+  pytest                         dev only  Runs the test-suite.
+  pyinstaller                    build only  Makes the .exe (6.x modern, 5.13.2 legacy).
+
+
+4) BUILDING THE INSTALLERS (build machine only)
+-----------------------------------------------
+  - Windows 10/11 PC with internet access (downloads Python + 7-Zip if absent)
+  - Python 3.12 or 3.13 (modern build) and Python 3.8 (legacy build)
+  - Inno Setup 6.3 or newer (Inno Setup 7 works):
+        C:\Users\<you>\AppData\Local\Programs\Inno Setup 7\ISCC.exe
+    The script finds it automatically (also searches Program Files).
+  - Then just run:   BUILD-ALL.cmd      (or BUILD-ALL.ps1)
+    Everything lands in the "dist" folder, clearly named.
+  See docs\BUILD.md for options (single flavour, skip steps, custom paths).
+
+
+5) PACKAGES YOU MAY HAVE HEARD OF BUT ARE *NOT* NEEDED
+------------------------------------------------------
+  py7zz / py7zr   NOT used. VOLUMAX drives the real 7-Zip engine directly, which
+                  gives it pause/resume/cancel, exact progress, symlink safety and
+                  a documented, bundled engine version. py7zz wraps the very same
+                  7-Zip program, so adding it would add a dependency and lose
+                  those controls. ZIP-bomb protection is built into VOLUMAX itself
+                  (file-count, total-size and compression-ratio limits, set in
+                  Settings).
+  ruff            Optional code linter for developers only.
+
+
+6) WHERE VOLUMAX WRITES (nothing else is ever touched)
+------------------------------------------------------
+  Settings, logs, crash reports : %APPDATA%\VOLUMAX
+  Temporary previews            : your Windows temp folder, files named volumax_*
+                                  (deleted automatically; Repair removes leftovers)
+  Portable mode                 : create an empty file "portable.flag" next to
+                                  VOLUMAX.exe and everything stays in .\data
+  No services, no scheduled tasks, no background processes, and the only
+  registry entries are the optional file associations made by the installer
+  (removed again by the uninstaller).
