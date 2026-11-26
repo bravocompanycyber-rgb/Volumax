@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.4
+- Build: a cached 7-Zip engine (build\engines\...) left by an older build is verified for the right CPU architecture
+  and is discarded and re-downloaded automatically if it is not (no manual cleanup needed).
+- Includes everything from 1.2.3 (which was committed but never delivered).
+
 ## 1.2.3
 - Fixed (crash): the failed-job notice kept a reference to a dialog Qt had already deleted; on Windows/PySide2 that
   caused an access violation. It is now one persistent dialog that is reused.

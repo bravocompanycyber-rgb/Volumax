@@ -374,7 +374,16 @@ def _fetch_legacy_engine(t: Target, log: Log) -> Path:
     installer = BUILD / "cache" / name
     out = BUILD / "engines" / f"legacy-{t.arch}-{LEGACY_7ZIP}"
     if (out / "7z.exe").is_file() and (out / "7z.dll").is_file():
-        return out
+        try:
+            good = pe_machine(out / "7z.exe") == t.arch and pe_machine(out / "7z.dll") == t.arch
+        except Exception:
+            good = False
+        if good or log.dry:
+            return out
+        # A cache left by an older build can hold a wrong-architecture DLL (7z.exe then reports
+        # "Unsupported archive type"). Throw it away and fetch a clean copy.
+        log.write(f"  cached engine in {out} is not a clean {t.arch} copy - re-fetching")
+        shutil.rmtree(out, ignore_errors=True)
     download(LEGACY_7ZIP_URL.format(v=LEGACY_7ZIP, arch=arch_part), installer, log)
     if not log.dry:
         _check_pinned_hash(name, installer, log)
