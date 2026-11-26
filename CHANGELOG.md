@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.3
+- Fixed (crash): the failed-job notice kept a reference to a dialog Qt had already deleted; on Windows/PySide2 that
+  caused an access violation. It is now one persistent dialog that is reused.
+- Build: the 7-Zip engine is now chosen by CPU architecture from the installer (exe AND dll), the DLL's architecture is
+  verified, and the engine is run for real (create + test 7z and zip) before packaging. The unpacked installer's file list
+  is written to the build log. (Targets the 32-bit legacy "Unsupported archive type" self-test failure.)
+- Tests: Windows-invalid file names and RAM-dependent assertions no longer fail on Windows.
+
 ## 1.2.2
 - Fixed: build stopped on Windows at `test_single_instance_merges_multiselect` (the test put client and server in one
   thread; Windows named pipes need the server's event loop). The test now uses real separate processes.

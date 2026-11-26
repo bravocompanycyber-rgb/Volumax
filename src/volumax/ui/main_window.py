@@ -621,24 +621,31 @@ class MainWindow(QMainWindow):
             self._notify_failure(job.name, str(msg))
 
     def _notify_failure(self, name: str, msg: str) -> None:
-        """ONE non-blocking notice at a time. A blocking dialog inside the poll timer
-        re-enters it and stacks a dialog per failed job (a failed batch of 20 = 20 modals)."""
+        """ONE non-blocking notice. The dialog is created once and REUSED: it is a child of this
+        window (destroyed with it) and never deleted while we hold a reference to it. An earlier
+        version used WA_DeleteOnClose and touched the dangling object, which crashed PySide2 on
+        Windows with an access violation."""
         box = getattr(self, "_fail_box", None)
-        try:
-            if box is not None and box.isVisible():
-                self._fail_more = getattr(self, "_fail_more", 0) + 1
-                box.setInformativeText(f"+{self._fail_more} more failed — details are in the Job Queue.")
-                return
-        except RuntimeError:  # the previous box was already deleted
-            pass
+        if box is None:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.setWindowModality(Qt.WindowModality.NonModal)
+            self._fail_box = box
+        if box.isVisible():
+            self._fail_more = getattr(self, "_fail_more", 0) + 1
+            box.setInformativeText(f"+{self._fail_more} more failed — details are in the Job Queue.")
+            return
         self._fail_more = 0
-        box = QMessageBox(QMessageBox.Icon.Warning, f"{name} failed", msg[:1500],
-                          QMessageBox.StandardButton.Ok, self)
-        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._fail_box = box
+        box.setWindowTitle(f"{name} failed")
+        box.setText(msg[:1500])
+        box.setInformativeText("")
         box.open()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        box = getattr(self, "_fail_box", None)
+        if box is not None:
+            box.hide()
         try:
             self.settings.set("window_geometry", self.saveGeometry().toHex().data().decode())
             self.settings.save()

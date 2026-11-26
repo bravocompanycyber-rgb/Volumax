@@ -159,3 +159,38 @@ def test_installer_script_is_consistent():
     for verb in re.findall(r'--(extract-here|extract-to-folder|add-to|add)\b', iss):
         assert verb in ("extract-here", "extract-to-folder", "add-to", "add")
     assert cli.parse(["--add-to", "7z", "x"]).kind == cli.ADD_TO
+
+
+def _fake_pe(path, machine: int):
+    import struct
+    head = bytearray(256)
+    head[0:2] = b"MZ"
+    struct.pack_into("<I", head, 0x3C, 0x80)
+    head[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<H", head, 0x84, machine)
+    path.write_bytes(bytes(head))
+
+
+def test_pe_machine_detects_architectures(tmp_path):
+    for machine, name in ((0x8664, "x64"), (0x014C, "x86"), (0xAA64, "arm64")):
+        f = tmp_path / f"{name}.dll"
+        _fake_pe(f, machine)
+        assert ba.pe_machine(f) == name
+    (tmp_path / "junk.dll").write_bytes(b"not a pe")
+    assert ba.pe_machine(tmp_path / "junk.dll") == "unknown"
+
+
+def test_engine_smoke_runs_the_real_engine_and_rejects_a_broken_one(tmp_path):
+    import os, shutil
+    real = shutil.which("7z")
+    if real is None or os.name == "nt":
+        import pytest
+        pytest.skip("needs a runnable 7z on PATH")
+    log = ba.Log(tmp_path / "b.log", False)
+    ba._engine_smoke(Path(real), log)                       # healthy engine passes
+    broken = tmp_path / "7z"
+    broken.write_text("#!/bin/sh\necho 'ERROR:\nUnsupported archive type'\nexit 2\n")
+    broken.chmod(0o755)
+    import pytest
+    with pytest.raises(ba.BuildError, match="cannot create"):
+        ba._engine_smoke(broken, log)

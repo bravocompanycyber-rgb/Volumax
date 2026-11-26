@@ -171,7 +171,7 @@ def read_version(override: Optional[str]) -> str:
 
 
 def artifact_name(kind: str, version: str, t: Target) -> str:
-    """VOLUMAX-1.2.2-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
+    """VOLUMAX-1.2.3-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
     base = f"{APP}-{version}-{kind}-{t.label}"
     return base + (".exe" if kind == "Setup" else ".zip")
 
@@ -340,8 +340,32 @@ def prepare_engine(t: Target, overrides: Dict[str, Path], log: Log) -> Path:
         got = pe_machine(exe)
         if got != t.arch:
             raise BuildError(f"7z.exe in {folder} is {got}, but target {t.key} needs {t.arch}")
+        dll = pe_machine(folder / "7z.dll")
+        if dll != t.arch:
+            raise BuildError(f"7z.dll in {folder} is {dll}, but target {t.key} needs {t.arch}")
         log.write(f"  engine OK: {exe} ({got}, sha256 {sha256(exe)[:16]}…)")
+        _engine_smoke(exe, log)
     return folder
+
+
+def _engine_smoke(exe: Path, log: Log) -> None:
+    """Run the engine for real (create + test a tiny 7z and zip) so a broken engine stops the build
+    HERE, with its own error message, instead of surfacing later as a failed self-test."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="volumax_engine_") as tmp:
+        t = Path(tmp)
+        (t / "f.txt").write_text("engine smoke test\n" * 100, encoding="utf-8")
+        for fmt in ("7z", "zip"):
+            out = t / f"x.{fmt}"
+            code, text = run([exe, "a", f"-t{fmt}", "-y", str(out), str(t / "f.txt")], log, check=False, quiet=True)
+            if code != 0 or not out.is_file():
+                raise BuildError(f"the 7-Zip engine {exe} cannot create a {fmt} archive "
+                                 f"(exit {code}): {text.strip()[:300]}")
+            code, text = run([exe, "t", str(out)], log, check=False, quiet=True)
+            if code != 0:
+                raise BuildError(f"the 7-Zip engine {exe} cannot test a {fmt} archive: {text.strip()[:300]}")
+    log.write("  engine smoke test OK (7z + zip create/test)")
 
 
 def _fetch_legacy_engine(t: Target, log: Log) -> Path:
@@ -367,7 +391,22 @@ def _fetch_legacy_engine(t: Target, log: Log) -> Path:
         raise BuildError("need 7z to unpack the 7-Zip installer")
     if not log.dry:
         out.mkdir(parents=True, exist_ok=True)
-        for fn in ("7z.exe", "7z.dll", "License.txt", "readme.txt"):
+        # The installer may contain several copies (different architectures / shell extensions).
+        # Pick the file of the RIGHT architecture instead of trusting the first name match.
+        log.write(f"  unpacked installer ({t.arch}):")
+        found: Dict[str, Path] = {}
+        for cand in sorted(stage.rglob("*")):
+            if cand.is_file() and cand.suffix.lower() in (".exe", ".dll"):
+                m = pe_machine(cand)
+                log.write(f"    {cand.relative_to(stage)}  [{m}]")
+                if cand.name.lower() in ("7z.exe", "7z.dll") and m == t.arch:
+                    found.setdefault(cand.name.lower(), cand)
+        for fn in ("7z.exe", "7z.dll"):
+            if fn not in found:
+                raise BuildError(f"the 7-Zip installer for {t.arch} contains no {fn} built for {t.arch} "
+                                 f"(see the list above)")
+            shutil.copy2(found[fn], out / fn)
+        for fn in ("License.txt", "readme.txt"):
             if (stage / fn).is_file():
                 shutil.copy2(stage / fn, out / fn)
         shutil.rmtree(stage, ignore_errors=True)
