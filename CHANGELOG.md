@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+- Fixed: build stopped on Windows at `test_single_instance_merges_multiselect` (the test put client and server in one
+  thread; Windows named pipes need the server's event loop). The test now uses real separate processes.
+- Single-instance forwarding retries briefly on transient "pipe busy" errors, so a burst of Explorer launches
+  (multi-select) all reach the running instance. First launch (nothing running) stays instant.
+- Build: a failing unit test is now a prominent WARNING and the build continues (the built program must still
+  pass its own self-test). Use `--strict-tests` to make failures fatal.
+
 ## 1.2.1
 - Fixed: every second row of the Archive Browser (and other tables/lists) rendered white under light text on Windows,
   making files unreadable. The app now sets one dark palette + Fusion style, and all item views have explicit

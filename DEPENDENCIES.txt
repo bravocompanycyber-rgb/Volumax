@@ -1,4 +1,4 @@
-VOLUMAX 1.2.1 - DEPENDENCIES AND HOW TO INSTALL THEM
+VOLUMAX 1.2.2 - DEPENDENCIES AND HOW TO INSTALL THEM
 =====================================================
 
 1) JUST USING VOLUMAX (installer or portable ZIP)
@@ -6,8 +6,8 @@ VOLUMAX 1.2.1 - DEPENDENCIES AND HOW TO INSTALL THEM
 You need NOTHING extra. The installers bundle Python, Qt, the 7-Zip engine and
 the optional Zstandard library. Pick the right file:
 
-  VOLUMAX-1.2.1-Setup-Modern-...     Windows 10 (1809 or newer) and Windows 11
-  VOLUMAX-1.2.1-Setup-Legacy-...     Windows 8, 8.1 (and Windows 7 SP1)
+  VOLUMAX-1.2.2-Setup-Modern-...     Windows 10 (1809 or newer) and Windows 11
+  VOLUMAX-1.2.2-Setup-Legacy-...     Windows 8, 8.1 (and Windows 7 SP1)
 
 Only if a very old, never-updated Windows says "api-ms-win-crt-... is missing":
   - Windows 7 / 8 / 8.1: install Microsoft update KB2999226 (Universal C Runtime)

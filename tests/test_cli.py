@@ -63,6 +63,14 @@ def test_quick_archive_naming(tmp_path: Path):
 
 
 def test_single_instance_merges_multiselect(tmp_path: Path):
+    """Five SEPARATE processes (like Explorer's multi-select) -> ONE merged command.
+
+    Client and server must not share a thread: on Windows a named-pipe server only accepts
+    while its event loop runs, so the clients are real subprocesses and this thread pumps events.
+    """
+    import subprocess
+    import sys
+
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     from volumax.single_instance import COLLECT_MS, InstanceServer, send_to_running
@@ -71,8 +79,28 @@ def test_single_instance_merges_multiselect(tmp_path: Path):
     name = f"VOLUMAX-test-{os.getpid()}"
     srv = InstanceServer(got.append, name=name)
     assert srv.listen()
-    for i in range(5):  # Explorer launches one process per selected file
-        assert send_to_running(cli.Command(cli.ADD_TO, [tmp_path / f"f{i}.txt"], "7z"), name=name)
+    client = (
+        "import sys\n"
+        "import volumax\n"
+        "from PySide6.QtCore import QCoreApplication\n"
+        "from pathlib import Path\n"
+        "from volumax import cli\n"
+        "from volumax.single_instance import send_to_running\n"
+        "app = QCoreApplication([])\n"
+        "ok = send_to_running(cli.Command(cli.ADD_TO, [Path(sys.argv[2])], '7z'), name=sys.argv[1], timeout_ms=3000)\n"
+        "sys.exit(0 if ok else 3)\n"
+    )
+    src_dir = str(Path(cli.__file__).resolve().parent.parent)
+    env = dict(os.environ, PYTHONPATH=src_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    procs = [
+        subprocess.Popen([sys.executable, "-c", client, name, str(tmp_path / f"f{i}.txt")], env=env)
+        for i in range(5)                      # all five launched at once, like a real multi-select
+    ]
+    end = time.monotonic() + 40
+    while any(p.poll() is None for p in procs) and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
+    assert [p.returncode for p in procs] == [0] * 5, "every launch must reach the running instance"
     end = time.monotonic() + 5
     while not got and time.monotonic() < end:
         app.processEvents()

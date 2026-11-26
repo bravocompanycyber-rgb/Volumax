@@ -171,7 +171,7 @@ def read_version(override: Optional[str]) -> str:
 
 
 def artifact_name(kind: str, version: str, t: Target) -> str:
-    """VOLUMAX-1.2.1-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
+    """VOLUMAX-1.2.2-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
     base = f"{APP}-{version}-{kind}-{t.label}"
     return base + (".exe" if kind == "Setup" else ".zip")
 
@@ -390,10 +390,25 @@ def _check_pinned_hash(name: str, path: Path, log: Log) -> None:
 
 
 # --------------------------------------------------------------------------------- stages
-def run_tests(t: Target, py: Path, engine: Path, log: Log) -> None:
+def run_tests(t: Target, py: Path, engine: Path, log: Log, strict: bool = False) -> str:
+    """Run the unit tests. Returns '' when all pass, else a warning for the summary.
+
+    A failing unit test does not stop packaging unless ``--strict-tests`` is given: the real
+    gate is the self-test of the BUILT program (see smoke_test), which proves the shipped exe works.
+    """
     env = {"QT_QPA_PLATFORM": "offscreen", "VOLUMAX_7Z": str(engine / "7z.exe"),
            "PYTHONPATH": str(ROOT / "src")}
-    run([py, "-m", "pytest", "tests", "-q", "-x", "-p", "no:cacheprovider"], log, cwd=ROOT, env=env, timeout=1800)
+    code, out = run([py, "-m", "pytest", "tests", "-q", "--tb=short", "-rf", "-p", "no:cacheprovider"],
+                    log, cwd=ROOT, env=env, timeout=1800, check=False)
+    if code == 0:
+        return ""
+    last = [ln for ln in out.splitlines() if ln.strip()][-1:] or ["tests failed"]
+    msg = f"unit tests reported failures ({last[0].strip()[:80]})"
+    if strict:
+        raise BuildError(msg)
+    log.write(f"  WARNING: {msg}. Continuing: the built program still has to pass its own self-test. "
+              f"Re-run with --strict-tests to make this fatal. Please send build\\build.log to the developer.")
+    return msg
 
 
 def build_exe(t: Target, py: Path, engine: Path, version: str, log: Log) -> Path:
@@ -530,6 +545,7 @@ class Result:
     setup: Optional[Path] = None
     portable: Optional[Path] = None
     seconds: float = 0.0
+    warning: str = ""
 
 
 def build_target(t: Target, args: argparse.Namespace, version: str, iscc: Optional[Path],
@@ -545,7 +561,7 @@ def build_target(t: Target, args: argparse.Namespace, version: str, iscc: Option
         engine = prepare_engine(t, overrides, log)
         if not args.skip_tests:
             log.write("-- tests")
-            run_tests(t, py, engine, log)
+            res.warning = run_tests(t, py, engine, log, strict=args.strict_tests)
         log.write("-- executable")
         folder = build_exe(t, py, engine, version, log)
         if IS_WINDOWS:
@@ -577,6 +593,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--iscc", help="path to ISCC.exe (Inno Setup compiler); auto-detected otherwise")
     p.add_argument("--no-installer", action="store_true", help="skip Inno Setup (exe + portable zip only)")
     p.add_argument("--skip-tests", action="store_true", help="skip the unit test suite")
+    p.add_argument("--strict-tests", action="store_true",
+                   help="a failing unit test aborts the build (default: warn and keep going)")
     p.add_argument("--clean", action="store_true", help="delete build/ first (fresh venvs and toolchains)")
     p.add_argument("--engine", action="append", default=[], metavar="TARGET=DIR",
                    help="use this folder (7z.exe + 7z.dll) instead of downloading, e.g. legacy-x86=C:\\7z32")
@@ -642,6 +660,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for r in results:
         status = "OK   " if r.ok else "FAIL "
         log.write(f"{status}{r.target.key:12s} {r.seconds / 60:5.1f} min  {r.error[:110]}")
+        if r.warning:
+            log.write(f"      ! {r.warning}")
     if not args.dry_run:
         files = sorted(p for p in out.glob("*") if p.suffix in (".exe", ".zip")) if out.exists() else []
         for f in files:

@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QThread, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from .cli import ADD, ADD_TO, Command
@@ -31,11 +31,36 @@ def server_name() -> str:
     return f"VOLUMAX-single-{user}"
 
 
+def _not_running_errors() -> tuple:
+    """Socket errors that mean 'nobody is listening' (no point retrying)."""
+    out = []
+    for name in ("ServerNotFoundError", "ConnectionRefusedError"):
+        try:
+            out.append(getattr(QLocalSocket.LocalSocketError, name))
+        except AttributeError:
+            try:
+                out.append(getattr(QLocalSocket, name))
+            except AttributeError:
+                pass
+    return tuple(out)
+
+
 def send_to_running(cmd: Command, name: Optional[str] = None, timeout_ms: int = 300) -> bool:
     """Forward ``cmd`` to an already-running instance. True if someone received it."""
     sock = QLocalSocket()
-    sock.connectToServer(name or server_name())
-    if not sock.waitForConnected(timeout_ms):
+    target = name or server_name()
+    not_running = _not_running_errors()
+    for _attempt in range(8):
+        sock.abort()
+        sock.connectToServer(target)
+        if sock.waitForConnected(timeout_ms):
+            break
+        if sock.error() in not_running:
+            return False          # no instance is running: first launch, stay fast
+        # Windows named pipes serve one client at a time; a burst of Explorer launches
+        # gets transient "pipe busy" errors. Back off briefly and retry.
+        QThread.msleep(40)
+    else:
         return False
     payload = json.dumps({"kind": cmd.kind, "fmt": cmd.fmt, "paths": [str(p) for p in cmd.paths]})
     sock.write(payload.encode("utf-8"))
