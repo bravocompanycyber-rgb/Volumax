@@ -44,3 +44,42 @@ def test_selected_tab_has_visible_marker_and_contrast():
     assert _cr(COLORS["text"], COLORS["bg_card"]) >= 4.5          # selected tab text
     assert _cr(COLORS["text_dim"], COLORS["bg_panel"]) >= 4.5     # unselected tab text
     assert _cr(COLORS["accent_gold"], COLORS["bg_card"]) >= 3.0   # underline marker (UI component, 3:1)
+
+
+def test_every_browser_row_is_readable_incl_alternate_and_selected(tmp_path):
+    """Regression: alternate rows were white (system palette) under light text."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QColor
+    from volumax.archive_manager import ArchiveManager
+    from volumax.ui.main_window import MainWindow
+    import time
+
+    app = QApplication.instance() or QApplication([])
+    src = tmp_path / "s"; src.mkdir()
+    for i in range(6):
+        (src / f"file {i}.pdf").write_bytes(b"x" * (1000 + i))
+    arc = tmp_path / "a.zip"
+    assert ArchiveManager().create(arc, [src / n for n in os.listdir(src)], format="zip").success
+    w = MainWindow(); w.resize(1000, 700); w.show()
+    w.open_archive(arc)
+    page = w.pages["browser"]
+    end = time.monotonic() + 15
+    while page.model.rowCount() < 6 and time.monotonic() < end:
+        app.processEvents(); time.sleep(0.01)
+    assert page.model.rowCount() == 6
+    page.view.selectRow(2); app.processEvents()
+    img = page.view.viewport().grab().toImage()
+    text = QColor(COLORS["text"])
+    def lum(c): return _lum("#%02x%02x%02x" % (c.red(), c.green(), c.blue()))
+    seen = set()
+    for row in range(6):
+        y = page.view.rowViewportPosition(row) + page.view.rowHeight(row) // 2
+        bg = QColor(img.pixel(3, y))
+        seen.add(bg.name())
+        fg = QColor('#ffffff') if row == 2 else text      # selected row uses white-on-blue
+        a, b = sorted((lum(fg), lum(bg)), reverse=True)
+        assert (a + 0.05) / (b + 0.05) >= 4.5, (row, bg.name())
+    assert len(seen) >= 2           # alternating + selected colours actually present
+    w.close()

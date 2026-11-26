@@ -171,7 +171,7 @@ def read_version(override: Optional[str]) -> str:
 
 
 def artifact_name(kind: str, version: str, t: Target) -> str:
-    """VOLUMAX-1.2.0-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
+    """VOLUMAX-1.2.1-Setup-Modern-Win10-11-x64[.exe] / ...-Portable-...zip"""
     base = f"{APP}-{version}-{kind}-{t.label}"
     return base + (".exe" if kind == "Setup" else ".zip")
 

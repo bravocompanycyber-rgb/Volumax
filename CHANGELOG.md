@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+- Fixed: every second row of the Archive Browser (and other tables/lists) rendered white under light text on Windows,
+  making files unreadable. The app now sets one dark palette + Fusion style, and all item views have explicit
+  row, alternate-row and selection colours (pixel-tested for contrast).
+
 ## 1.2.0
 **Reliability / self-healing**
 - App starts even if the 7-Zip engine is missing; Diagnostics page can re-detect, repair or locate it.

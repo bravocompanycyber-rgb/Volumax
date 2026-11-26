@@ -98,6 +98,27 @@ QToolBar QToolButton:checked {{
     background-color: {COLORS["accent_blue"]};
     color: white;
 }}
+QAbstractItemView {{
+    background-color: {COLORS["bg_panel"]};
+    alternate-background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    selection-background-color: {COLORS["accent_blue"]};
+    selection-color: #ffffff;
+    gridline-color: {COLORS["border"]};
+    border: 1px solid {COLORS["border"]};
+    border-radius: 6px;
+}}
+QAbstractItemView::item:hover {{
+    background-color: {COLORS["bg_hover"]};
+}}
+QAbstractItemView {{
+    outline: 0;
+}}
+QAbstractItemView::item:selected, QAbstractItemView::item:selected:active,
+QAbstractItemView::item:selected:!active, QAbstractItemView::item:selected:hover {{
+    background-color: {COLORS["accent_blue"]};
+    color: #ffffff;
+}}
 QListWidget {{
     background-color: {COLORS["bg_panel"]};
     border: none;
@@ -254,6 +275,36 @@ QDialog {{
 """
 
 
+def apply_theme(app) -> None:
+    """Application-wide dark palette + Fusion style.
+
+    Without this, any widget the stylesheet does not name (e.g. a QTableView) falls back to the
+    Windows system palette: its alternate-row colour is WHITE, which made every second row of
+    the Archive Browser unreadable (light text on white).
+    """
+    from PySide6.QtGui import QPalette as P
+
+    if app.property("volumax_theme_applied"):   # once per process: restyling is expensive
+        return
+    app.setProperty("volumax_theme_applied", True)
+    app.setStyle("Fusion")  # identical rendering on Windows 8, 10 and 11
+    pal = P()
+    c = QColor
+    for role, col in (
+        (P.ColorRole.Window, COLORS["bg_dark"]), (P.ColorRole.WindowText, COLORS["text"]),
+        (P.ColorRole.Base, COLORS["bg_panel"]), (P.ColorRole.AlternateBase, COLORS["bg_card"]),
+        (P.ColorRole.Text, COLORS["text"]), (P.ColorRole.Button, COLORS["bg_card"]),
+        (P.ColorRole.ButtonText, COLORS["text"]), (P.ColorRole.BrightText, "#ffffff"),
+        (P.ColorRole.ToolTipBase, COLORS["bg_card"]), (P.ColorRole.ToolTipText, COLORS["text"]),
+        (P.ColorRole.Highlight, COLORS["accent_blue"]), (P.ColorRole.HighlightedText, "#ffffff"),
+        (P.ColorRole.Link, COLORS["link"]), (P.ColorRole.PlaceholderText, COLORS["text_dim"]),
+    ):
+        pal.setColor(role, c(col))
+    for role in (P.ColorRole.Text, P.ColorRole.WindowText, P.ColorRole.ButtonText):
+        pal.setColor(P.ColorGroup.Disabled, role, c(COLORS["text_dim"]))
+    app.setPalette(pal)
+
+
 NAV_ITEMS = [
     ("Home", "dashboard"),
     ("Create Archive", "create"),
@@ -394,6 +445,10 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
 
         self._build_ui()
+        from PySide6.QtWidgets import QApplication as _A
+
+        if _A.instance() is not None:
+            apply_theme(_A.instance())
         self.setStyleSheet(STYLESHEET)
 
         self._job_timer = QTimer(self)
