@@ -452,14 +452,14 @@ def test_error_hints():
     assert explain("something totally new") == ""
 
 
-def test_failed_batch_shows_one_notice_not_a_stack(window, app, tmp_path):
+def test_failed_batch_shows_one_banner_not_a_stack(window, app, tmp_path):
     """Regression: every failed job used to open its own blocking modal dialog."""
     q = get_job_queue()
     for i in range(12):
         q.submit(f"fail {i}", lambda progress=None, cancel=None, pause=None: (_ for _ in ()).throw(RuntimeError("nope")))
     wait_jobs(app)
-    assert pump(app, lambda: window.statusBar().currentMessage().startswith("✖"), 10)
+    assert pump(app, lambda: window.banner.isVisible(), 10)
+    assert "failed" in window.banner_text.text()
     from PySide6.QtWidgets import QMessageBox as MB
-    open_boxes = [w for w in QApplication.topLevelWidgets() if isinstance(w, MB) and w.isVisible()]
-    mine = [b for b in open_boxes if b.parent() is window]
-    assert len(mine) <= 1
+    assert not [w for w in QApplication.topLevelWidgets() if isinstance(w, MB) and w.isVisible()]
+    window.banner.hide()

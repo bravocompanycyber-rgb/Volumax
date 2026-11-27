@@ -194,3 +194,24 @@ def test_engine_smoke_runs_the_real_engine_and_rejects_a_broken_one(tmp_path):
     import pytest
     with pytest.raises(ba.BuildError, match="cannot create"):
         ba._engine_smoke(broken, log)
+
+
+def test_engine_diagnostics_text():
+    from volumax import selftest
+
+    assert "engine exe:" in selftest.engine_diagnostics()
+
+
+def test_pin_bundled_engine_restores_originals(tmp_path, monkeypatch):
+    src = tmp_path / "src"; src.mkdir()
+    (src / "7z.exe").write_bytes(b"MZ-original-exe")
+    (src / "7z.dll").write_bytes(b"MZ-original-dll")
+    bundle = tmp_path / "VOLUMAX"; (bundle / "engines" / "7zip").mkdir(parents=True)
+    (bundle / "engines" / "7zip" / "7z.exe").write_bytes(b"MZ-original-exe")
+    (bundle / "engines" / "7zip" / "7z.dll").write_bytes(b"CORRUPTED-BY-PACKER")   # damaged copy
+    calls = []
+    monkeypatch.setattr(ba, "_engine_smoke", lambda exe, log: calls.append(exe))
+    log = ba.Log(tmp_path / "l.txt", dry=False)
+    ba.pin_bundled_engine(bundle, src, log)
+    assert (bundle / "engines" / "7zip" / "7z.dll").read_bytes() == b"MZ-original-dll"
+    assert calls and calls[0].name == "7z.exe"       # the in-place engine is exercised

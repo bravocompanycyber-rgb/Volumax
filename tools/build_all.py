@@ -446,8 +446,15 @@ def run_tests(t: Target, py: Path, engine: Path, log: Log, strict: bool = False)
     """
     env = {"QT_QPA_PLATFORM": "offscreen", "VOLUMAX_7Z": str(engine / "7z.exe"),
            "PYTHONPATH": str(ROOT / "src")}
-    code, out = run([py, "-m", "pytest", "tests", "-q", "--tb=short", "-rf", "-p", "no:cacheprovider"],
-                    log, cwd=ROOT, env=env, timeout=1800, check=False)
+    base = BUILD / "pytest-tmp"      # private temp root: avoids pytest's %TEMP%\\pytest-current link (Access denied on some PCs)
+    if not log.dry:
+        shutil.rmtree(base, ignore_errors=True)
+    code, out = run([py, "-m", "pytest", "tests", "-q", "--tb=short", "-rf", "-p", "no:cacheprovider",
+                     "--basetemp", str(base)], log, cwd=ROOT, env=env, timeout=1800, check=False)
+    if code != 0 and "[100%]" in out and "FAILED" not in out and "fatal exception" not in out \
+            and re.search(r"Error: .*pytest-(current|of-)", out):
+        log.write("  note: every test passed; pytest could not clean its own temp folder (ignored)")
+        return ""
     if code == 0:
         return ""
     last = [ln for ln in out.splitlines() if ln.strip()][-1:] or ["tests failed"]
@@ -482,6 +489,27 @@ def build_exe(t: Target, py: Path, engine: Path, version: str, log: Log) -> Path
     return folder
 
 
+def pin_bundled_engine(folder: Path, engine: Path, log: Log) -> None:
+    """Make the bundle's engine byte-identical to the verified source engine, then run it in place.
+
+    PyInstaller handles .dll files it is given as data/binaries; on the 32-bit legacy build the
+    packaged 7z.exe could not load its format DLL ("Unsupported archive type") although the
+    original files worked. Copying the originals over the bundle's copies removes that variable."""
+    if log.dry:
+        return
+    dst = folder / "engines" / "7zip"
+    dst.mkdir(parents=True, exist_ok=True)
+    for fn in ("7z.exe", "7z.dll"):
+        src_f, dst_f = engine / fn, dst / fn
+        if not dst_f.is_file() or sha256(dst_f) != sha256(src_f):
+            log.write(f"  bundled {fn} differs from the verified engine - restoring original")
+            shutil.copy2(src_f, dst_f)
+        if sha256(dst_f) != sha256(src_f):
+            raise BuildError(f"could not place the original {fn} into the bundle ({dst_f})")
+    log.write("  bundled engine is identical to the verified engine; testing it in place")
+    _engine_smoke(dst / "7z.exe", log)
+
+
 def smoke_test(t: Target, folder: Path, log: Log) -> None:
     """Run the BUILT program's self-test: Qt DLLs/plugins, bundled 7-Zip, archive round trip, UI."""
     exe = folder / (APP + (".exe" if IS_WINDOWS else ""))
@@ -495,8 +523,14 @@ def smoke_test(t: Target, folder: Path, log: Log) -> None:
     if not report.exists():
         raise BuildError(f"self-test produced no report (exit {code}) — the executable does not start")
     data = json.loads(report.read_text(encoding="utf-8"))
+    failed = not data.get("ok")
     for name, result in data.get("checks", {}).items():
-        if not name.endswith(".trace"):
+        if name.endswith(".trace"):
+            if failed:
+                log.write(f"    --- {name} ---\n{result}")
+        elif name == "engine_diag":
+            log.write(f"    --- engine diagnostics ---\n{result}")
+        else:
             log.write(f"    {name:18s} {result}")
     if not data.get("ok"):
         raise BuildError(f"self-test FAILED for {t.key} (see {report})")
@@ -612,6 +646,7 @@ def build_target(t: Target, args: argparse.Namespace, version: str, iscc: Option
             res.warning = run_tests(t, py, engine, log, strict=args.strict_tests)
         log.write("-- executable")
         folder = build_exe(t, py, engine, version, log)
+        pin_bundled_engine(folder, engine, log)
         if IS_WINDOWS:
             sign([folder / f"{APP}.exe"], args, log)
         log.write("-- self-test of the built program")

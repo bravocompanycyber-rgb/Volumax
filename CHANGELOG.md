@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.5
+- Fixed (crash): the failed-job notice is now an in-window banner (red bar with "Show Job Queue" / "Dismiss") instead of a
+  pop-up dialog. Pop-up dialog objects crashed PySide2 on Windows (access violation); a banner has no window lifetime.
+  A closed window also stops its job-polling timer.
+- Build: after PyInstaller the bundled 7-Zip files are verified byte-for-byte against the verified engine, restored if
+  different, and run in place (create + test 7z/zip). Failed self-tests now print their traces and an engine report
+  (file list with CPU types and the formats `7z i` can load). Targets the 32-bit "Unsupported archive type" failure.
+- Build: pytest runs with a private temp folder; its own "Access is denied" cleanup error on some PCs is recognised and
+  no longer reported as a test failure.
+
 ## 1.2.4
 - Build: a cached 7-Zip engine (build\engines\...) left by an older build is verified for the right CPU architecture
   and is discarded and re-downloaded automatically if it is not (no manual cleanup needed).

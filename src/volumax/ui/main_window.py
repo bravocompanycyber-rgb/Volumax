@@ -483,7 +483,36 @@ class MainWindow(QMainWindow):
 
         # Content stack
         self.stack = QStackedWidget()
-        root.addWidget(self.stack, 1)
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(0)
+        # In-window failure banner: never a pop-up window, so there is no dialog lifetime to get
+        # wrong (separate QMessageBox objects crashed PySide2 on Windows).
+        self.banner = QFrame()
+        self.banner.setObjectName("banner")
+        self.banner.setStyleSheet(
+            f"QFrame#banner {{ background-color: {COLORS['danger_fill']}; border-radius: 0px; }}"
+            "QFrame#banner QLabel { background: transparent; color: #ffffff; font-weight: 600; }"
+            "QFrame#banner QPushButton { background-color: rgba(255,255,255,0.18); color: #ffffff; "
+            "border: 1px solid rgba(255,255,255,0.55); padding: 4px 12px; border-radius: 6px; }"
+            "QFrame#banner QPushButton:hover { background-color: rgba(255,255,255,0.32); }"
+        )
+        brow = QHBoxLayout(self.banner)
+        brow.setContentsMargins(16, 8, 12, 8)
+        self.banner_text = QLabel("")
+        self.banner_text.setWordWrap(True)
+        self.banner_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        btn_q = QPushButton("Show Job Queue")
+        btn_q.clicked.connect(lambda: (self.goto("queue"), self.banner.hide()))
+        btn_x = QPushButton("Dismiss")
+        btn_x.clicked.connect(self.banner.hide)
+        brow.addWidget(self.banner_text, 1)
+        brow.addWidget(btn_q)
+        brow.addWidget(btn_x)
+        self.banner.hide()
+        content.addWidget(self.banner)
+        content.addWidget(self.stack, 1)
+        root.addLayout(content, 1)
 
         # Pages
         self.pages: dict[str, QWidget] = {}
@@ -621,31 +650,22 @@ class MainWindow(QMainWindow):
             self._notify_failure(job.name, str(msg))
 
     def _notify_failure(self, name: str, msg: str) -> None:
-        """ONE non-blocking notice. The dialog is created once and REUSED: it is a child of this
-        window (destroyed with it) and never deleted while we hold a reference to it. An earlier
-        version used WA_DeleteOnClose and touched the dangling object, which crashed PySide2 on
-        Windows with an access violation."""
-        box = getattr(self, "_fail_box", None)
-        if box is None:
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Icon.Warning)
-            box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            box.setWindowModality(Qt.WindowModality.NonModal)
-            self._fail_box = box
-        if box.isVisible():
+        """Show ONE failure banner inside the window; further failures only bump a counter."""
+        if self.banner.isVisible():
             self._fail_more = getattr(self, "_fail_more", 0) + 1
-            box.setInformativeText(f"+{self._fail_more} more failed — details are in the Job Queue.")
+            self.banner_text.setText(
+                f"✖ {self._fail_first}   (+{self._fail_more} more failed — see the Job Queue)")
             return
         self._fail_more = 0
-        box.setWindowTitle(f"{name} failed")
-        box.setText(msg[:1500])
-        box.setInformativeText("")
-        box.open()
+        self._fail_first = f"{name} failed: {msg}"[:400]
+        self.banner_text.setText("✖ " + self._fail_first)
+        self.banner.show()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        box = getattr(self, "_fail_box", None)
-        if box is not None:
-            box.hide()
+        try:
+            self._job_timer.stop()      # a closed window must not keep announcing jobs
+        except Exception:
+            pass
         try:
             self.settings.set("window_geometry", self.saveGeometry().toHex().data().decode())
             self.settings.save()

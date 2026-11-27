@@ -27,6 +27,44 @@ def _check(results: Dict[str, str], name: str, fn: Callable[[], object]) -> bool
         return False
 
 
+def _machine(path: Path) -> str:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096)
+        off = int.from_bytes(head[0x3C:0x40], "little")
+        m = int.from_bytes(head[off + 4: off + 6], "little")
+        return {0x14C: "x86", 0x8664: "x64", 0xAA64: "arm64"}.get(m, hex(m))
+    except Exception:
+        return "?"
+
+
+def engine_diagnostics() -> str:
+    """What the packaged engine looks like and what it says (used when a check fails)."""
+    import subprocess
+
+    from .config import find_7zip_exe
+
+    lines: List[str] = []
+    exe = find_7zip_exe()
+    lines.append(f"engine exe: {exe}")
+    if exe is None:
+        return "\n".join(lines)
+    for p in sorted(Path(exe).parent.glob("*")):
+        try:
+            lines.append(f"  {p.name:16s} {p.stat().st_size:>10,d} bytes  {_machine(p) if p.suffix.lower() in ('.exe', '.dll') else ''}")
+        except OSError:
+            pass
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        out = subprocess.run([str(exe), "i"], capture_output=True, text=True, timeout=30,
+                             stdin=subprocess.DEVNULL, creationflags=flags)
+        lines.append("`7z i` (formats the engine can load):")
+        lines.append((out.stdout + out.stderr).strip()[:1200])
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"could not run 7z i: {exc}")
+    return "\n".join(lines)
+
+
 def run(report_path: str) -> int:
     from . import QT_BINDING, __version__
     from .config import ASSETS_DIR, ENGINES_DIR, PROJECT_ROOT, find_7zip_exe
@@ -160,6 +198,11 @@ def run(report_path: str) -> int:
     ok.append(_check(checks, "extras", extras_check))
     ok.append(_check(checks, "smallpack", smallpack_check))
 
+    if not all(ok):
+        try:
+            checks["engine_diag"] = engine_diagnostics()
+        except Exception as exc:  # noqa: BLE001
+            checks["engine_diag"] = f"diagnostics failed: {exc}"
     report = {
         "ok": all(ok),
         "version": __version__,
