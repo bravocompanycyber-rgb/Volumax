@@ -1,0 +1,81 @@
+ .gitignore                              |   5 [32m+[m
+ BUILD-ALL.cmd                           |   5 [32m+[m
+ BUILD-ALL.ps1                           |  67 [32m+++[m
+ CHANGELOG.md                            |  72 [32m+++[m
+ DEPENDENCIES.txt                        |  95 [32m++++[m
+ README.md                               |  14 [32m+[m
+ THIRD-PARTY-NOTICES.txt                 |  25 [32m+[m
+ assets/check.png                        | Bin [31m0[m -> [32m638[m bytes
+ assets/logo.ico                         | Bin [31m20237[m -> [32m157095[m bytes
+ assets/logo.png                         | Bin [31m2715[m -> [32m648086[m bytes
+ assets/logo1.ico                        | Bin [31m0[m -> [32m20237[m bytes
+ assets/logo1.png                        | Bin [31m0[m -> [32m2715[m bytes
+ assets/logo_mark.png                    | Bin [31m0[m -> [32m239003[m bytes
+ assets/source/logo-original.jpg         | Bin [31m0[m -> [32m280645[m bytes
+ docs/BUILD.md                           |  74 [32m+++[m
+ docs/STATUS-REPORT.md                   |  34 [32m++[m
+ docs/VAULT.md                           |  44 [32m++[m
+ docs/screenshots/create.png             | Bin [31m0[m -> [32m84772[m bytes
+ docs/screenshots/dashboard.png          | Bin [31m0[m -> [32m85559[m bytes
+ docs/screenshots/diagnostics.png        | Bin [31m0[m -> [32m61585[m bytes
+ docs/screenshots/extract.png            | Bin [31m0[m -> [32m70324[m bytes
+ docs/screenshots/home-clear-history.png | Bin [31m0[m -> [32m90948[m bytes
+ docs/screenshots/settings.png           | Bin [31m0[m -> [32m93657[m bytes
+ docs/screenshots/tools.png              | Bin [31m0[m -> [32m58322[m bytes
+ docs/screenshots/vault-1-contract.png   | Bin [31m0[m -> [32m168985[m bytes
+ docs/screenshots/vault-2-create.png     | Bin [31m0[m -> [32m138220[m bytes
+ docs/screenshots/vault-3-unlock.png     | Bin [31m0[m -> [32m63921[m bytes
+ installer/volumax.iss                   | 209 [32m++++++++[m
+ installer/wizard-large.bmp              | Bin [31m0[m -> [32m154542[m bytes
+ installer/wizard-small.bmp              | Bin [31m0[m -> [32m9294[m bytes
+ packaging/entry.py                      |   7 [32m+[m
+ packaging/volumax.manifest              |  27 [32m++[m
+ requirements.txt                        |  13 [32m+[m[31m-[m
+ requirements/legacy.txt                 |   9 [32m+[m
+ requirements/modern.txt                 |   7 [32m+[m
+ src/volumax/__init__.py                 |  10 [32m+[m[31m-[m
+ src/volumax/app.py                      | 108 [32m++++[m[31m-[m
+ src/volumax/backends/sevenzip.py        |  36 [32m+[m[31m-[m
+ src/volumax/checksums.py                |   4 [32m+[m[31m-[m
+ src/volumax/cli.py                      | 152 [32m++++++[m
+ src/volumax/compat.py                   |  66 [32m+++[m
+ src/volumax/config.py                   |  25 [32m+[m
+ src/volumax/controller.py               | 219 [32m+++++++++[m
+ src/volumax/engine.py                   |   9 [32m+[m
+ src/volumax/extraction.py               |  36 [32m+[m[31m-[m
+ src/volumax/extras.py                   | 307 [32m++++++++++++[m
+ src/volumax/jobs.py                     |   7 [32m+[m[31m-[m
+ src/volumax/qtcompat.py                 |  47 [32m++[m
+ src/volumax/selfheal.py                 | 321 [32m+++++++++++++[m
+ src/volumax/selftest.py                 | 243 [32m++++++++++[m
+ src/volumax/settings.py                 |  31 [32m+[m[31m-[m
+ src/volumax/single_instance.py          | 136 [32m++++++[m
+ src/volumax/smallpack.py                | 284 [32m+++++++++++[m
+ src/volumax/ui/archive_browser.py       |  14 [32m+[m[31m-[m
+ src/volumax/ui/convert_dialog.py        |   9 [32m+[m[31m-[m
+ src/volumax/ui/create_dialog.py         | 221 [32m++++++++[m[31m-[m
+ src/volumax/ui/diagnostics_page.py      | 138 [32m++++++[m
+ src/volumax/ui/duplicates_page.py       |   5 [32m+[m[31m-[m
+ src/volumax/ui/extract_dialog.py        |   9 [32m+[m[31m-[m
+ src/volumax/ui/integrity_page.py        |   5 [32m+[m[31m-[m
+ src/volumax/ui/main_window.py           | 305 [32m++++++++++[m[31m--[m
+ src/volumax/ui/package_dialog.py        |   7 [32m+[m[31m-[m
+ src/volumax/ui/settings_dialog.py       |   6 [32m+[m[31m-[m
+ src/volumax/ui/tools_page.py            | 388 [32m+++++++++++++++[m
+ src/volumax/ui/vault_dialogs.py         | 496 [32m+++++++++++++++++++[m
+ src/volumax/ui/volume_dialog.py         |   7 [32m+[m[31m-[m
+ src/volumax/vault.py                    | 815 [32m++++++++++++++++++++++++++++++++[m
+ src/volumax/vault_store.py              | 241 [32m++++++++++[m
+ tests/test_build_tools.py               | 217 [32m+++++++++[m
+ tests/test_cli.py                       | 113 [32m+++++[m
+ tests/test_controller.py                |  88 [32m++++[m
+ tests/test_engine_v2.py                 |  18 [32m+[m[31m-[m
+ tests/test_extras.py                    |  91 [32m++++[m
+ tests/test_hardening.py                 | 104 [32m++++[m
+ tests/test_simulation.py                | 465 [32m++++++++++++++++++[m
+ tests/test_smallpack.py                 |  40 [32m++[m
+ tests/test_ui_flows.py                  |  91 [32m++++[m
+ tests/test_vault.py                     | 366 [32m++++++++++++++[m
+ tools/build_all.py                      | 761 [32m+++++++++++++++++++++++++++++[m
+ tools/engine-hashes.json                |   4 [32m+[m
+ 80 files changed, 7640 insertions(+), 132 deletions(-)
