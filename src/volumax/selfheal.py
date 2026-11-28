@@ -124,6 +124,15 @@ def run_checks(manager=None) -> list[Check]:
     checks.append(Check("7-Zip engine", eng_ok, eng_detail,
                         "Repair re-detects it; or use 'Locate 7z.exe' to point at one."))
 
+    # vault crypto (libsodium via PyNaCl)
+    try:
+        from . import vault as _vault
+        vok = _vault.AVAILABLE
+        vdetail = "libsodium available (Argon2id, XChaCha20-Poly1305)" if vok else "PyNaCl/libsodium is missing"
+    except Exception as exc:  # noqa: BLE001
+        vok, vdetail = False, f"error: {exc}"
+    checks.append(Check("Vault encryption", vok, vdetail, "Reinstall VOLUMAX; the vault needs PyNaCl.", warn=True))
+
     # settings
     from .settings import get_settings
 

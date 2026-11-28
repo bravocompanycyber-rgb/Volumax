@@ -1,4 +1,4 @@
-VOLUMAX 1.2.5 - DEPENDENCIES AND HOW TO INSTALL THEM
+VOLUMAX 1.3.0 - DEPENDENCIES AND HOW TO INSTALL THEM
 =====================================================
 
 1) JUST USING VOLUMAX (installer or portable ZIP)
@@ -6,8 +6,8 @@ VOLUMAX 1.2.5 - DEPENDENCIES AND HOW TO INSTALL THEM
 You need NOTHING extra. The installers bundle Python, Qt, the 7-Zip engine and
 the optional Zstandard library. Pick the right file:
 
-  VOLUMAX-1.2.5-Setup-Modern-...     Windows 10 (1809 or newer) and Windows 11
-  VOLUMAX-1.2.5-Setup-Legacy-...     Windows 8, 8.1 (and Windows 7 SP1)
+  VOLUMAX-1.3.0-Setup-Modern-...     Windows 10 (1809 or newer) and Windows 11
+  VOLUMAX-1.3.0-Setup-Legacy-...     Windows 8, 8.1 (and Windows 7 SP1)
 
 Only if a very old, never-updated Windows says "api-ms-win-crt-... is missing":
   - Windows 7 / 8 / 8.1: install Microsoft update KB2999226 (Universal C Runtime)
@@ -40,6 +40,11 @@ VOLUMAX_7Z environment variable to the full path of 7z.exe.
   7-Zip (7z.exe, 7z.dll)         REQUIRED  The compression engine. Bundled.
                                            If missing the app still opens and
                                            Diagnostics tells you how to fix it.
+  pynacl (libsodium)             REQUIRED  The encrypted .volumax vault: Argon2id key
+                                           derivation and XChaCha20-Poly1305. Bundled
+                                           in the installer. Without it only the vault
+                                           is disabled (Diagnostics says so).
+                                           Install:  pip install pynacl
   psutil                         optional  Reads free memory so the compressor
                                            never picks a dictionary too big for
                                            your PC. Without it: safe defaults.

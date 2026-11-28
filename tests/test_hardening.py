@@ -83,3 +83,22 @@ def test_every_browser_row_is_readable_incl_alternate_and_selected(tmp_path):
         assert (a + 0.05) / (b + 0.05) >= 4.5, (row, bg.name())
     assert len(seen) >= 2           # alternating + selected colours actually present
     w.close()
+
+
+def test_clear_recent_history(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from volumax.ui.main_window import MainWindow
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    real = tmp_path / "a.7z"
+    real.write_bytes(b"x")
+    w._set_recent([str(real), str(tmp_path / "gone.7z")])
+    dash = w.pages["dashboard"]
+    assert len(dash._paths()) == 2
+    dash._forget_missing()
+    assert dash._paths() == [str(real)]
+    dash.btn_clear_recent.click()
+    assert dash._paths() == [] and w.settings.get("recent_archives") == []
+    assert not dash.btn_clear_recent.isEnabled()

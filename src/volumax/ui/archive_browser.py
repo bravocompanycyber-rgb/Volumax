@@ -37,7 +37,7 @@ logger = logging.getLogger("volumax.ui.browser")
 
 ARCHIVE_FILTER = (
     "Archives (*.zip *.7z *.rar *.tar *.tar.gz *.tgz *.tar.bz2 *.tbz2 *.tar.xz *.txz "
-    "*.gz *.bz2 *.xz *.iso *.cab *.wim *.001);;All files (*)"
+    "*.gz *.bz2 *.xz *.iso *.cab *.wim *.001 *.volumax);;All files (*)"
 )
 RISKY_EXTENSIONS = {
     ".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".ps1", ".vbs", ".vbe", ".js", ".jse",
@@ -55,6 +55,7 @@ def _cleanup_temp() -> None:
 
 class ArchiveBrowserPage(QWidget):
     opened = Signal(str)  # path of an archive that opened successfully
+    vault_found = Signal(str)  # the chosen file is a Volumax vault (recognised by signature)
 
     def __init__(self, manager: ArchiveManager, parent=None) -> None:
         super().__init__(parent)
@@ -173,6 +174,10 @@ class ArchiveBrowserPage(QWidget):
             self.load_archive(Path(path))
 
     def load_archive(self, path: Path, password: str | None = None) -> None:
+        from .. import vault as _vault
+        if _vault.sniff(path):
+            self.vault_found.emit(str(path))
+            return
         if password is None:
             self._password = None
         self.current = Path(path)

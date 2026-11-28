@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+- New: **Volumax Vault (.volumax)** - an encrypted container only Volumax opens (signature-recognised, Argon2id +
+  XChaCha20-Poly1305 via libsodium, unlock-method selector, key document, opt-in self-destruct with an external
+  attempt counter, duress/decoy secret, encrypted hash-chained audit log, memory hygiene, one-time no-recovery
+  contract). Applies only when that format is chosen. Read docs/VAULT.md for the honest limits.
+- New: **Clear history** (and per-item removal / clear missing) for recently opened archives.
+- Dependency: pynacl (bundled in the installer).
+
 ## 1.2.5
 - Fixed (crash): the failed-job notice is now an in-window banner (red bar with "Show Job Queue" / "Dismiss") instead of a
   pop-up dialog. Pop-up dialog objects crashed PySide2 on Windows (access violation); a banner has no window lifetime.

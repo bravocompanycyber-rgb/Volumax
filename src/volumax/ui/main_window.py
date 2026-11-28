@@ -28,7 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..archive_manager import ArchiveManager
-from ..compat import looks_like_archive, safe_exists  # noqa: F401  (looks_like_archive is re-exported)
+from .. import vault
+from ..compat import looks_like_archive, safe_exists
+from .vault_dialogs import ContractPanel, VaultPage  # noqa: F401  (looks_like_archive is re-exported)
 from ..config import ASSETS_DIR
 from ..jobs import JobState, get_job_queue
 from ..settings import get_settings
@@ -185,6 +187,13 @@ QLineEdit, QSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
     border-color: {COLORS["accent_blue"]};
 }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border: 2px solid #8fa3c4; border-radius: 4px; background-color: #0f1725;
+}}
+QCheckBox::indicator:hover {{ border-color: #d4a017; }}
+QCheckBox::indicator:checked {{
+    background-color: #d4a017; border-color: #d4a017; image: url(@CHECK@);
+}}
 QGroupBox {{
     border: 1px solid {COLORS["border"]};
     border-radius: 8px;
@@ -317,6 +326,7 @@ NAV_ITEMS = [
     ("Duplicate Finder", "duplicates"),
     ("Job Queue", "queue"),
     ("Tools", "tools"),
+    ("Vault", "vault"),
     ("Diagnostics", "diagnostics"),
     ("Settings", "settings"),
 ]
@@ -327,6 +337,7 @@ class DashboardPage(QWidget):
 
     navigate = Signal(str)          # page key
     open_requested = Signal(str)    # archive path
+    recent_changed = Signal(list)   # new history after the user removed entries
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -385,10 +396,25 @@ class DashboardPage(QWidget):
             cards.addWidget(card, i // 3, i % 3)
         layout.addLayout(cards)
 
+        recent_row = QHBoxLayout()
         recent_title = QLabel("Recent archives")
         recent_title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(recent_title)
+        recent_row.addWidget(recent_title)
+        recent_row.addStretch()
+        self.btn_clear_missing = QPushButton("Remove missing")
+        self.btn_clear_missing.setObjectName("secondary")
+        self.btn_clear_missing.setToolTip("Forget entries whose files no longer exist")
+        self.btn_clear_missing.clicked.connect(self._forget_missing)
+        self.btn_clear_recent = QPushButton("Clear history")
+        self.btn_clear_recent.setObjectName("secondary")
+        self.btn_clear_recent.setToolTip("Forget all recently opened archives (the files themselves are not touched)")
+        self.btn_clear_recent.clicked.connect(lambda: self.recent_changed.emit([]))
+        recent_row.addWidget(self.btn_clear_missing)
+        recent_row.addWidget(self.btn_clear_recent)
+        layout.addLayout(recent_row)
         self.recent = QListWidget()
+        self.recent.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.recent.customContextMenuRequested.connect(self._recent_menu)
         self.recent.setMaximumHeight(220)
         self.recent.itemActivated.connect(
             lambda it: self.open_requested.emit(it.data(Qt.ItemDataRole.UserRole))
@@ -399,8 +425,41 @@ class DashboardPage(QWidget):
         layout.addWidget(self.recent)
         layout.addStretch()
 
+    def _paths(self) -> list[str]:
+        out = []
+        for i in range(self.recent.count()):
+            v = self.recent.item(i).data(Qt.ItemDataRole.UserRole)
+            if v:
+                out.append(v)
+        return out
+
+    def _forget_missing(self) -> None:
+        self.recent_changed.emit([p for p in self._paths() if safe_exists(Path(p))])
+
+    def _recent_menu(self, pos) -> None:
+        item = self.recent.itemAt(pos)
+        if item is None or not item.data(Qt.ItemDataRole.UserRole):
+            return
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act = menu.addAction("Remove from history")
+        if menu.exec(self.recent.viewport().mapToGlobal(pos)) is act:
+            gone = item.data(Qt.ItemDataRole.UserRole)
+            self.recent_changed.emit([p for p in self._paths() if p != gone])
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Delete and self.recent.hasFocus():
+            it = self.recent.currentItem()
+            if it is not None and it.data(Qt.ItemDataRole.UserRole):
+                gone = it.data(Qt.ItemDataRole.UserRole)
+                self.recent_changed.emit([p for p in self._paths() if p != gone])
+                return
+        super().keyPressEvent(event)
+
     def set_recent(self, paths: list[str]) -> None:
         self.recent.clear()
+        self.btn_clear_recent.setEnabled(bool(paths))
+        self.btn_clear_missing.setEnabled(bool(paths))
         if not paths:
             hint = QListWidgetItem("No recent archives yet — open one with the button above, or drop it here.")
             hint.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -449,7 +508,7 @@ class MainWindow(QMainWindow):
 
         if _A.instance() is not None:
             apply_theme(_A.instance())
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(STYLESHEET.replace("@CHECK@", (ASSETS_DIR / "check.png").as_posix()))
 
         self._job_timer = QTimer(self)
         self._job_timer.timeout.connect(self._poll_jobs)
@@ -510,6 +569,13 @@ class MainWindow(QMainWindow):
         brow.addWidget(btn_q)
         brow.addWidget(btn_x)
         self.banner.hide()
+        self.contract = ContractPanel()
+        content.addWidget(self.contract)
+        try:
+            from ..vault_store import default_store
+            self.contract.setVisible(not default_store().contract_accepted())
+        except Exception:
+            self.contract.setVisible(False)    # never block the app on a store problem
         content.addWidget(self.banner)
         content.addWidget(self.stack, 1)
         root.addLayout(content, 1)
@@ -528,6 +594,7 @@ class MainWindow(QMainWindow):
         self.pages["queue"] = QueuePanel(self.queue)
         self.pages["tools"] = ToolsPage(self.manager)
         self.pages["diagnostics"] = DiagnosticsPage(self.manager)
+        self.pages["vault"] = VaultPage()
         self.pages["settings"] = SettingsDialog(self.settings, embedded=True, manager=self.manager)
 
         for label, key in NAV_ITEMS:
@@ -545,6 +612,8 @@ class MainWindow(QMainWindow):
         dash.open_requested.connect(lambda p: self.open_archive(Path(p)))
         dash.set_recent(self.settings.get("recent_archives", []))
         self.pages["browser"].opened.connect(self._remember_recent)
+        self.pages["browser"].vault_found.connect(lambda p: self.open_archive(Path(p)))
+        dash.recent_changed.connect(self._set_recent)
 
         # Status bar
         self.status = QStatusBar()
@@ -591,9 +660,18 @@ class MainWindow(QMainWindow):
                 return
 
     def open_archive(self, path: Path) -> None:
+        if vault.sniff(path):      # recognised by signature, whatever the file is called
+            self.goto("vault")
+            self.pages["vault"].load(Path(path))
+            return
         self.goto("browser")
         self.pages["tools"].set_archive(Path(path))
         self.pages["browser"].load_archive(Path(path))
+
+    def _set_recent(self, recent: list) -> None:
+        self.settings.set("recent_archives", list(recent))
+        self.settings.save()
+        self.pages["dashboard"].set_recent(list(recent))
 
     def _remember_recent(self, path: str) -> None:
         recent = [p for p in self.settings.get("recent_archives", []) if p != path]
@@ -612,7 +690,7 @@ class MainWindow(QMainWindow):
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
         if not paths:
             return
-        if len(paths) == 1 and paths[0].is_file() and looks_like_archive(paths[0]):
+        if len(paths) == 1 and paths[0].is_file() and (looks_like_archive(paths[0]) or vault.sniff(paths[0])):
             self.open_archive(paths[0])
         else:
             self.goto("create")

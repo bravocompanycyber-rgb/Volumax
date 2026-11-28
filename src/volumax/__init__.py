@@ -1,6 +1,6 @@
 """VOLUMAX — Professional Windows Archive Management Application."""
 
-__version__ = "1.2.5"
+__version__ = "1.3.0"
 __author__ = "Bravo Projects"
 __app_name__ = "VOLUMAX"
 

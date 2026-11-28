@@ -194,7 +194,32 @@ def run(report_path: str) -> int:
                 raise RuntimeError(f"{r.message} / {e.message}")
         return "zstandard small-file pack round-trip"
 
+    def vault_check():
+        from . import vault as vlt
+
+        if not vlt.AVAILABLE:
+            raise RuntimeError("PyNaCl/libsodium is missing from this build")
+        with tempfile.TemporaryDirectory(prefix="volumax_selftest_") as tmp:
+            t = Path(tmp)
+            (t / "s").mkdir()
+            (t / "s" / "a.txt").write_text("vault self-test " * 50)
+            dest = t / "v.jpg"                       # extension is irrelevant on purpose
+            vlt.create_vault(dest, [t / "s"], vlt.CreateOptions(
+                vlt.Secret("passphrase", "selftest passphrase"), ops=1, mem_kib=8192))
+            if not vlt.sniff(dest):
+                raise RuntimeError("signature not recognised")
+            try:
+                vlt.unlock(dest, vlt.Secret("passphrase", "wrong passphrase!"))
+                raise RuntimeError("a wrong secret was accepted")
+            except vlt.WrongSecret:
+                pass
+            with vlt.unlock(dest, vlt.Secret("passphrase", "selftest passphrase")) as s:
+                if s.extract(t / "o") != 1 or s.read_member("s/a.txt")[:5] != b"vault":
+                    raise RuntimeError("round trip failed")
+        return "libsodium: Argon2id + XChaCha20-Poly1305 round-trip"
+
     ok.append(_check(checks, "health", health))
+    ok.append(_check(checks, "vault", vault_check))
     ok.append(_check(checks, "extras", extras_check))
     ok.append(_check(checks, "smallpack", smallpack_check))
 

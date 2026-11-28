@@ -2,6 +2,7 @@
 # Windows 8/8.1 build: see requirements/legacy.txt.  Details: DEPENDENCIES.txt
 PySide6>=6.12.0
 psutil>=7.0.0          # optional: memory-aware compression tuning
+pynacl>=1.6,<2       # the encrypted .volumax vault (libsodium)
 zstandard>=0.23        # optional: Tools -> Small-file Pack
 pytest>=9.0.0          # dev
 ruff>=0.17.0           # dev (linter)
