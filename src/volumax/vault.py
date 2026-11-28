@@ -46,14 +46,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Sequence
 
+AVAILABLE_ERROR: Optional[str] = None
+
 try:  # PyNaCl is a hard requirement of the vault feature only
     import nacl.bindings as _nb
     import nacl.exceptions as _nex
     import nacl.pwhash.argon2id as _argon
     import nacl.utils as _nutils
-    AVAILABLE = hasattr(_nb, "crypto_secretstream_xchacha20poly1305_init_push")
-except Exception:  # pragma: no cover - reported by diagnostics
+
+    AVAILABLE = hasattr(
+        _nb, "crypto_secretstream_xchacha20poly1305_init_push"
+    )
+
+    if not AVAILABLE:
+        AVAILABLE_ERROR = (
+            "PyNaCl imported, but the required secretstream API is missing"
+        )
+
+except Exception as exc:  # pragma: no cover - reported by diagnostics
     AVAILABLE = False
+    AVAILABLE_ERROR = f"{type(exc).__name__}: {exc}"
 
 MAGIC = b"\x89VLMX\r\n\x1a"
 VERSION = 1

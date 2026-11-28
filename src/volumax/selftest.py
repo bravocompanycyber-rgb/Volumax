@@ -198,7 +198,10 @@ def run(report_path: str) -> int:
         from . import vault as vlt
 
         if not vlt.AVAILABLE:
-            raise RuntimeError("PyNaCl/libsodium is missing from this build")
+            detail = getattr(vlt, "AVAILABLE_ERROR", None)
+            raise RuntimeError(
+                f"PyNaCl/libsodium is unavailable: {detail or 'unknown import error'}"
+            )
         with tempfile.TemporaryDirectory(prefix="volumax_selftest_") as tmp:
             t = Path(tmp)
             (t / "s").mkdir()
