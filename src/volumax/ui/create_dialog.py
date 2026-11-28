@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -24,16 +25,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import is_relative_to, safe_exists, safe_is_dir
 from ..archive_manager import ArchiveManager
+from ..backends.base import BackendResult
 from ..compression import PRESETS, analyze_sources, plan_compression
+from ..extras import export_create_script, verify_created, write_sha256_sidecar
 from ..jobs import get_job_queue
 from ..security import assess_password
 from ..settings import get_settings
+from .vault_dialogs import VAULT_FORMAT, VaultOptionsPanel
 from .widgets.workers import run_in_background
+from .. import vault as vlt
 
 logger = logging.getLogger("volumax.ui.create")
 
-FORMATS = ["7z", "zip", "tar.xz", "tar.gz", "tar.bz2", "tar"]
+FORMATS = ["7z", "zip", "tar.xz", "tar.gz", "tar.bz2", "tar", VAULT_FORMAT]
 PRESET_LABELS = {
     "store": "Store (no compression)",
     "fastest": "Fastest",
@@ -43,7 +49,8 @@ PRESET_LABELS = {
     "ultra": "Ultra (smallest, slowest)",
 }
 EXTENSIONS = {"7z": ".7z", "zip": ".zip", "tar": ".tar", "tar.gz": ".tar.gz",
-              "tar.bz2": ".tar.bz2", "tar.xz": ".tar.xz"}
+              "tar.bz2": ".tar.bz2", "tar.xz": ".tar.xz", VAULT_FORMAT: ".volumax"}
+
 
 
 class CreateArchiveDialog(QWidget):
@@ -70,7 +77,7 @@ class CreateArchiveDialog(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         layout.addWidget(title)
 
-        src_group = QGroupBox("Source Files & Folders  (you can also drag them in)")
+        src_group = QGroupBox("Source Files && Folders  (you can also drag them in)")
         src_layout = QVBoxLayout(src_group)
         self.source_list = QListWidget()
         self.source_list.setMinimumHeight(110)
@@ -94,6 +101,7 @@ class CreateArchiveDialog(QWidget):
 
         opt = QGroupBox("Options")
         form = QFormLayout(opt)
+        self._form = form
 
         self.output_edit = QLineEdit()
         self.output_edit.setPlaceholderText("Output archive path (suggested automatically)…")
@@ -110,6 +118,9 @@ class CreateArchiveDialog(QWidget):
         self.format_combo.setCurrentText(self.settings.get("default_format", "7z"))
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         form.addRow("Format:", self.format_combo)
+        self.vault_panel = VaultOptionsPanel()
+        self.vault_panel.setVisible(False)
+        self._vault_rows = []      # widgets hidden while the vault format is selected
 
         self.preset_combo = QComboBox()
         for key in PRESETS:
@@ -121,7 +132,7 @@ class CreateArchiveDialog(QWidget):
 
         self.plan_label = QLabel("Add files to see which method will be used.")
         self.plan_label.setWordWrap(True)
-        self.plan_label.setStyleSheet("color: #8b9bb4;")
+        self.plan_label.setStyleSheet("color: #a9b6cb;")
         form.addRow("", self.plan_label)
 
         adv = QHBoxLayout()
@@ -140,10 +151,12 @@ class CreateArchiveDialog(QWidget):
         self.threads_spin.setValue(int(self.settings.get("threads", 0)))
         adv.addWidget(self.solid_check)
         adv.addWidget(self.smart_check)
-        adv.addWidget(QLabel("Threads:"))
+        self.threads_label = QLabel("Threads:")
+        adv.addWidget(self.threads_label)
         adv.addWidget(self.threads_spin)
         adv.addStretch()
         form.addRow("Advanced:", adv)
+        self._adv_layout = adv
 
         self.split_check = QCheckBox("Split into volumes of")
         self.split_spin = QSpinBox()
@@ -160,7 +173,7 @@ class CreateArchiveDialog(QWidget):
 
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_edit.setPlaceholderText("Optional password (AES-256)")
+        self.password_edit.setPlaceholderText("Password (AES-256) — leave empty for none")
         self.password_edit.textChanged.connect(self._on_password_changed)
         form.addRow("Password:", self.password_edit)
         self.password2_edit = QLineEdit()
@@ -170,14 +183,29 @@ class CreateArchiveDialog(QWidget):
         self.strength_label = QLabel("")
         form.addRow("", self.strength_label)
 
-        self.encrypt_names = QCheckBox("Encrypt filenames too (7z only)")
+        self.encrypt_names = QCheckBox("Also hide file names (7z only, recommended with a password)")
+        self.encrypt_names.setChecked(True)
         form.addRow("", self.encrypt_names)
+        self.verify_check = QCheckBox("Verify the archive after creating it (recommended)")
+        self.verify_check.setChecked(bool(self.settings.get("verify_after_create", True)))
+        form.addRow("", self.verify_check)
+        self.sidecar_check = QCheckBox("Also save a SHA-256 checksum file (.sha256)")
+        self.sidecar_check.setChecked(bool(self.settings.get("write_checksum_sidecar", False)))
+        form.addRow("", self.sidecar_check)
         layout.addWidget(opt)
+        layout.addWidget(self.vault_panel)
 
         self.btn_create = QPushButton("Create Archive")
         self.btn_create.setObjectName("gold")
         self.btn_create.clicked.connect(self._create)
-        layout.addWidget(self.btn_create)
+        self.btn_script = QPushButton("Export as script…")
+        self.btn_script.setObjectName("secondary")
+        self.btn_script.setToolTip("Save these settings as a .bat/.ps1/.sh script for scheduled or automated backups.\nThe password is never written into the script — it is asked for when the script runs.")
+        self.btn_script.clicked.connect(self._export_script)
+        row = QHBoxLayout()
+        row.addWidget(self.btn_create, 1)
+        row.addWidget(self.btn_script)
+        layout.addLayout(row)
         layout.addStretch()
         self._on_format_changed(self.format_combo.currentText())
 
@@ -192,7 +220,7 @@ class CreateArchiveDialog(QWidget):
     # ------------------------------------------------------------- sources
     def add_sources(self, paths: list[Path]) -> None:
         for p in paths:
-            if p.exists() and p not in self.sources:
+            if safe_exists(p) and p not in self.sources:
                 self.sources.append(p)
                 self.source_list.addItem(str(p))
         self._suggest_output()
@@ -223,10 +251,32 @@ class CreateArchiveDialog(QWidget):
         return EXTENSIONS[self.format_combo.currentText()]
 
     def _on_format_changed(self, fmt: str) -> None:
+        is_vault = fmt == VAULT_FORMAT
+        self.vault_panel.setVisible(is_vault)
+        for field in (self.preset_combo, self.plan_label, self._adv_layout, self.password_edit,
+                      self.password2_edit, self.strength_label):
+            lab = self._form.labelForField(field)
+            if lab is not None:
+                lab.setVisible(not is_vault)
+        for w in (self.threads_label, self.preset_combo, self.plan_label, self.solid_check, self.smart_check, self.threads_spin,
+                  self.password_edit, self.password2_edit, self.strength_label, self.encrypt_names,
+                  self.verify_check, self.sidecar_check, self.split_check, self.split_spin, self.btn_script):
+            w.setVisible(not is_vault)
+        if is_vault:
+            self.password_edit.clear()
+            self.password2_edit.clear()
+            text = self.output_edit.text().strip()
+            if text:
+                self.output_edit.setText(self._with_extension(text))
+            else:
+                self._suggest_output()
+            return
         is7z, is_tar_codec = fmt == "7z", fmt.startswith("tar.")
         self.solid_check.setEnabled(is7z)
         self.encrypt_names.setEnabled(is7z)
-        if not is7z:
+        if is7z:
+            self.encrypt_names.setChecked(True)   # strongest option by default
+        else:
             self.encrypt_names.setChecked(False)
         for w in (self.password_edit, self.password2_edit):
             w.setEnabled(not is_tar_codec and fmt != "tar")
@@ -257,7 +307,7 @@ class CreateArchiveDialog(QWidget):
             return
         first = self.sources[0]
         if len(self.sources) == 1:
-            stem = first.name if first.is_dir() else first.stem
+            stem = first.name if safe_is_dir(first) else first.stem
         else:
             stem = first.parent.name or "archive"
         self.output_edit.setText(str(first.parent / (stem or "archive")) + self._ext())
@@ -315,6 +365,9 @@ class CreateArchiveDialog(QWidget):
         if not out:
             QMessageBox.warning(self, "No output", "Specify an output archive path.")
             return
+        if self.format_combo.currentText() == VAULT_FORMAT:
+            self._create_vault(out)
+            return
         password = self.password_edit.text() or None
         if password and password != self.password2_edit.text():
             QMessageBox.warning(
@@ -324,13 +377,13 @@ class CreateArchiveDialog(QWidget):
             return
 
         archive = Path(self._with_extension(out))
-        if archive.exists():
+        if safe_exists(archive):
             ans = QMessageBox.question(
                 self, "Replace file?", f"{archive.name} already exists. Replace it?"
             )
             if ans != QMessageBox.StandardButton.Yes:
                 return
-        if any(archive == s or archive.is_relative_to(s) for s in self.sources if s.is_dir()):
+        if any(archive == s or is_relative_to(archive, s) for s in self.sources if safe_is_dir(s)):
             QMessageBox.warning(
                 self, "Output inside source",
                 "The archive would be created inside a folder you are archiving. "
@@ -352,20 +405,154 @@ class CreateArchiveDialog(QWidget):
         volume = f"{self.split_spin.value()}m" if self.split_check.isChecked() else None
         manager = self.manager
 
-        for key, value in (("compression_preset", preset), ("default_format", fmt),
+        verify = self.verify_check.isChecked() and volume is None
+        sidecar = self.sidecar_check.isChecked()
+        for key, value in (("verify_after_create", self.verify_check.isChecked()),
+                           ("write_checksum_sidecar", sidecar),
+                           ("compression_preset", preset), ("default_format", fmt),
                            ("solid", options["solid"]), ("smart_compression", options["smart"]),
                            ("threads", options["threads"])):
             self.settings.set(key, value)
         self.settings.save()
 
         def job(progress=None, cancel=None, pause=None):
-            if archive.exists():
-                archive.unlink()
-            return manager.create(
+            guard = _space_problem(archive.parent, sources)
+            if guard:
+                return BackendResult(False, guard)
+            backup = None
+            if safe_exists(archive):  # keep the old file until the new one is safely built
+                backup = archive.with_name(archive.name + ".volumax-old")
+                try:
+                    if safe_exists(backup):
+                        backup.unlink()
+                    archive.replace(backup)
+                except OSError as exc:
+                    return BackendResult(False, f"Cannot replace the existing file: {exc}")
+            result = manager.create(
                 archive, sources, format=fmt, password=password,
                 encrypt_filenames=encrypt, volume_size=volume,
                 progress=progress, cancel=cancel, pause=pause, **options,
             )
+            if result.success and verify:
+                ok, note = verify_created(manager, archive, password, sidecar=sidecar)
+                if not ok:
+                    result = BackendResult(False, note)
+                else:
+                    result.message = f"{result.message} {note}".strip()
+            elif result.success and sidecar:
+                try:
+                    write_sha256_sidecar(archive)
+                except OSError:
+                    pass
+            if backup is not None:
+                if result.success:
+                    backup.unlink(missing_ok=True)
+                else:  # failed or cancelled: put the original back
+                    try:
+                        if safe_exists(archive):
+                            archive.unlink()
+                        backup.replace(archive)
+                    except OSError:
+                        pass
+            return result
 
         j = get_job_queue().submit(f"Create {archive.name}", job)
         self.plan_label.setText(f"Queued as job {j.id} — progress is in the Job Queue.")
+
+
+    def _create_vault(self, out: str) -> None:
+        from ..vault_store import default_store
+        try:
+            opts = self.vault_panel.build_options()
+        except vlt.VaultError as exc:
+            QMessageBox.warning(self, "Vault", str(exc))
+            return
+        dest = Path(self._with_extension(out))
+        if safe_exists(dest):
+            ans = QMessageBox.question(self, "Replace file?", f"{dest.name} already exists. Replace it?")
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+        if any(dest == s or is_relative_to(dest, s) for s in self.sources if safe_is_dir(s)):
+            QMessageBox.warning(self, "Output inside source",
+                                "The vault would be created inside a folder you are storing. Choose a different location.")
+            return
+        sources = list(self.sources)
+        store = default_store()
+
+        def job(progress=None, cancel=None, pause=None):
+            guard = _space_problem(dest.parent, sources)
+            if guard:
+                return BackendResult(False, guard)
+            try:
+                vlt.harden_process()
+                uid = vlt.create_vault(dest, sources, opts, progress=progress, cancel=cancel)
+                # prove it opens before telling the user it is safe (uses the real secret, no counter)
+                with vlt.unlock(dest, opts.secret) as s:
+                    n = len([e for e in s.entries if not e.get("d")])
+                store.audit("created", uid.hex())
+            except vlt.Cancelled:
+                return BackendResult(False, "Cancelled.")
+            except vlt.VaultError as exc:
+                return BackendResult(False, str(exc))
+            except OSError as exc:
+                return BackendResult(False, f"Could not write the vault: {exc}")
+            finally:
+                opts.secret.text = ""
+            return BackendResult(True, f"Vault created and test-opened ({n} files). Keep your secret safe: "
+                                       "there is no way to recover it.")
+
+        j = get_job_queue().submit(f"Create vault {dest.name}", job)
+        self.vault_panel.clear_secrets()
+        self.plan_label.setText(f"Queued as job {j.id} — progress is in the Job Queue.")
+        self.plan_label.setVisible(True)
+
+    def _export_script(self) -> None:
+        if not self.sources:
+            QMessageBox.warning(self, "No sources", "Add at least one file or folder first.")
+            return
+        out = self.output_edit.text().strip()
+        if not out:
+            QMessageBox.warning(self, "No output", "Specify an output archive path first.")
+            return
+        native = "bat" if os.name == "nt" else "sh"
+        path, chosen = QFileDialog.getSaveFileName(
+            self, "Export script", f"volumax-backup.{native}",
+            "Batch file (*.bat);;PowerShell (*.ps1);;Shell script (*.sh)",
+        )
+        if not path:
+            return
+        shell = Path(path).suffix.lower().lstrip(".")
+        shell = shell if shell in ("bat", "ps1", "sh") else native
+        fmt = self.format_combo.currentText()
+        if fmt not in ("7z", "zip"):
+            QMessageBox.information(self, "Format", "Script export supports 7z and ZIP; exporting as 7z.")
+            fmt = "7z"
+        try:
+            text = export_create_script(
+                str(self.manager.engine.exe or "7z"), Path(self._with_extension(out)), list(self.sources),
+                fmt=fmt, preset=self.preset_combo.currentData(), solid=self.solid_check.isChecked(),
+                threads=self.threads_spin.value(), shell=shell,
+                encrypt=bool(self.password_edit.text()), encrypt_filenames=self.encrypt_names.isChecked(),
+            )
+            with open(path, "w", encoding="utf-8", newline="") as fh:   # py3.8-safe
+                fh.write(text)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save", str(exc))
+            return
+        self.plan_label.setText(f"Script saved: {path}")
+
+
+def _space_problem(folder: Path, sources) -> str:
+    """Plain-language message when the output drive clearly cannot hold the result."""
+    import shutil
+
+    try:
+        probe = folder if safe_exists(folder) else folder.parent
+        free = shutil.disk_usage(probe).free
+    except OSError:
+        return ""
+    prof = analyze_sources(list(sources))
+    if free < 50 * 1024 * 1024 or free < prof.low_gain_bytes:
+        return (f"Not enough free space on the destination drive ({free // (1024 * 1024):,} MB free). "
+                "Free some space or choose another location.")
+    return ""

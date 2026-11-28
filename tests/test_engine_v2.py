@@ -59,15 +59,18 @@ def test_tar_formats_reject_passwords(tmp_path: Path, tree_src: Path):
 def test_selected_names_are_matched_literally(tmp_path: Path):
     src = tmp_path / "s"
     src.mkdir()
-    for n in ("we[ird]*name?.txt", "plain.txt", "日本 語.txt"):
+    weird = "we[ird]*name?.txt"
+    if os.name == "nt":      # Windows forbids * and ? in file names; keep the brackets/space/unicode cases
+        weird = "we[ird]name.txt"
+    for n in (weird, "plain.txt", "日本 語.txt"):
         (src / n).write_text(n)
     be = SevenZipBackend()
     for fmt in ("7z", "tar.gz"):
         arc = tmp_path / f"a.{fmt}"
         assert be.create_archive(arc, [src], format=fmt).success
         out = tmp_path / f"o_{fmt}"
-        assert be.extract_archive(arc, out, selected_files=["s/we[ird]*name?.txt", "s/日本 語.txt"]).success
-        assert sorted(p.name for p in out.rglob("*") if p.is_file()) == ["we[ird]*name?.txt", "日本 語.txt"]
+        assert be.extract_archive(arc, out, selected_files=[f"s/{weird}", "s/日本 語.txt"]).success
+        assert sorted(p.name for p in out.rglob("*") if p.is_file()) == sorted([weird, "日本 語.txt"])
 
 
 # --------------------------------------------------------------- encryption
@@ -110,7 +113,14 @@ def test_plan_presets_and_options():
     assert plan_compression("7z", preset="store").args == ["-mx=0"]
     assert "-ms=off" in plan_compression("7z", preset="normal", solid=False).args
     assert "-mmt=4" in plan_compression("7z", preset="normal", threads=4).args
-    ultra = plan_compression("7z", preset="ultra", profile=SourceProfile(total_bytes=200_000_000))
+    import volumax.compression as comp
+
+    comp_avail = comp._available_mb
+    comp._available_mb = lambda: 16384          # the dictionary is capped by FREE RAM; pin it for the test
+    try:
+        ultra = plan_compression("7z", preset="ultra", profile=SourceProfile(total_bytes=200_000_000))
+    finally:
+        comp._available_mb = comp_avail
     assert "fb=273" in " ".join(ultra.args) and ultra.dictionary_mb >= 128
     assert plan_compression("tar").method == "store"
 

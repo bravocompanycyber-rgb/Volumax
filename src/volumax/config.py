@@ -31,6 +31,11 @@ def _resolve_user_dir() -> Path:
     override = os.environ.get("VOLUMAX_HOME")
     if override:
         return Path(override)
+    # Portable mode: a file named "portable.flag" next to the program keeps settings
+    # and logs in a "data" folder beside it (nothing is written to the user profile).
+    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
+    if exe_dir is not None and (exe_dir / "portable.flag").is_file():
+        return exe_dir / "data"
     if os.name == "nt":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
         return Path(base) / "VOLUMAX"
@@ -59,10 +64,27 @@ SEVEN_ZIP_EXE_CANDIDATES = [
 ]
 
 
+def _saved_engine_path() -> Path | None:
+    """Engine path the user picked via Diagnostics > Locate (stored in settings.json)."""
+    try:
+        import json
+
+        data = json.loads((_resolve_user_dir() / "settings.json").read_text(encoding="utf-8"))
+        p = Path(str(data.get("sevenzip_path", "")))
+        if str(p) and p.is_file() and not (p.suffix.lower() == ".exe" and os.name != "nt"):
+            return p
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
 def find_7zip_exe() -> Path | None:
     override = os.environ.get("VOLUMAX_7Z")
     if override and Path(override).is_file():
         return Path(override)
+    saved = _saved_engine_path()
+    if saved is not None:
+        return saved
     for candidate in SEVEN_ZIP_EXE_CANDIDATES:
         try:
             if candidate.is_file():
@@ -77,6 +99,9 @@ def find_7zip_exe() -> Path | None:
 
 DEFAULT_SETTINGS: dict = {
     "theme": "dark",
+    "sevenzip_path": "",
+    "verify_after_create": True,
+    "write_checksum_sidecar": False,
     "accent": "#3b82f6",
     "compression_level": 5,
     "default_format": "7z",

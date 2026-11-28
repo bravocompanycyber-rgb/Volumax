@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compat import safe_exists
 from ..archive_manager import ArchiveManager
 from ..jobs import get_job_queue
 from ..settings import get_settings
@@ -50,7 +51,7 @@ class IndependentPackageDialog(QWidget):
             "compressed size, and the final ZIP size is verified — nothing oversized is kept."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #8b9bb4;")
+        info.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(info)
 
         src_group = QGroupBox("Sources")
@@ -100,7 +101,7 @@ class IndependentPackageDialog(QWidget):
         self.btn.clicked.connect(self._run)
         layout.addWidget(self.btn)
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color: #8b9bb4;")
+        self.status_lbl.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(self.status_lbl)
         layout.addStretch()
         self.setAcceptDrops(True)
@@ -112,7 +113,7 @@ class IndependentPackageDialog(QWidget):
     def dropEvent(self, event) -> None:  # noqa: N802
         for u in event.mimeData().urls():
             p = Path(u.toLocalFile())
-            if u.isLocalFile() and p.exists() and p not in self.sources:
+            if u.isLocalFile() and safe_exists(p) and p not in self.sources:
                 self.sources.append(p)
                 self.source_list.addItem(str(p))
 

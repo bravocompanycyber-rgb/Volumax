@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..compat import safe_is_dir
 from ..duplicate_finder import DuplicateFinder
 from .widgets.workers import run_in_background
 
@@ -25,7 +26,7 @@ class DuplicatesPage(QWidget):
         layout.addWidget(title)
 
         info = QLabel("Scan folders for exact duplicate files by content hash (SHA-256).")
-        info.setStyleSheet("color: #8b9bb4;")
+        info.setStyleSheet("color: #a9b6cb;")
         layout.addWidget(info)
 
         row = QHBoxLayout()
@@ -57,7 +58,7 @@ class DuplicatesPage(QWidget):
 
     def _scan(self):
         root = self.root_edit.text().strip()
-        if not root or not Path(root).is_dir():
+        if not root or not safe_is_dir(Path(root)):
             QMessageBox.warning(self, "Missing", "Select a valid folder.")
             return
         self.btn_scan.setEnabled(False)

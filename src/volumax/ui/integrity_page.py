@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from ..compat import safe_exists
 from ..archive_manager import ArchiveManager
 from ..checksums import hash_file, SUPPORTED_ALGORITHMS
 from .widgets.workers import run_in_background
@@ -83,7 +84,7 @@ class IntegrityPage(QWidget):
 
     def _test(self):
         path = self.arch_edit.text().strip()
-        if not path or not Path(path).exists():
+        if not path or not safe_exists(Path(path)):
             QMessageBox.warning(self, "Missing", "Select a valid archive.")
             return
         pwd = self.pwd.text() or None
@@ -100,7 +101,7 @@ class IntegrityPage(QWidget):
 
     def _hash(self):
         path = self.file_edit.text().strip()
-        if not path or not Path(path).exists():
+        if not path or not safe_exists(Path(path)):
             QMessageBox.warning(self, "Missing", "Select a file.")
             return
         algo = self.algo.currentText()

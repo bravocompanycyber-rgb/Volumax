@@ -1,0 +1,25 @@
+VOLUMAX — third-party software
+==============================
+
+VOLUMAX is © Bravo Projects. It includes and uses the following components.
+
+7-Zip (engine)            Copyright (C) 1999-2026 Igor Pavlov
+  Used unmodified as a separate program (engines\7zip\7z.exe / 7z.dll) to read and write
+  archives. Licensed under the GNU LGPL; the unRAR code is additionally subject to the
+  "unRAR restriction" (it may not be used to re-create the RAR compression algorithm).
+  Full license text: engines\7zip\License.txt when shipped by the engine package, and at
+  https://www.7-zip.org/license.txt. Source code: https://www.7-zip.org/
+
+Qt for Python (PySide6 / PySide2) and Qt   Copyright (C) The Qt Company Ltd. and contributors
+  Used under the GNU LGPL v3, dynamically linked (the Qt libraries ship as separate DLLs
+  that you may replace with your own build of the same version).
+  https://www.qt.io/  https://doc.qt.io/qtforpython/  License: https://www.gnu.org/licenses/lgpl-3.0.html
+
+Python                    Copyright (C) Python Software Foundation — PSF License
+  https://docs.python.org/3/license.html
+
+psutil                    Copyright (C) Giampaolo Rodola — BSD 3-Clause
+  https://github.com/giampaolo/psutil
+
+PyInstaller (bootloader)  GPL v2 with the bootloader exception that permits distributing
+  the generated executables under any license.   https://pyinstaller.org/

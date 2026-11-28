@@ -1,0 +1,9 @@
+# LEGACY build — Windows 8 / 8.1 (and 7 SP1), 64- and 32-bit. Python 3.8 ONLY.
+# Qt 6 / Python >= 3.9 do not run on these systems, so this build uses Qt 5.15.
+PySide2==5.15.2.1
+shiboken2==5.15.2.1
+psutil==5.9.8
+pynacl==1.6.2           # REQUIRED for the encrypted .volumax vault (abi3 wheels for py3.8, win32 + win_amd64)
+pyinstaller==5.13.2
+pytest>=7,<8.4
+zstandard==0.23.0       # optional: Small-file Pack (last release with Python 3.8 wheels)

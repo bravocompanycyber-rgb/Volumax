@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+
+from .compat import file_digest
 from typing import Callable, Iterable
 
 logger = logging.getLogger("volumax.checksums")
@@ -24,7 +26,7 @@ def hash_file(
     path = Path(path)
     if progress is None and max_bytes is None:
         with open(path, "rb") as f:
-            return hashlib.file_digest(f, algorithm).hexdigest()  # C-speed loop
+            return file_digest(f, algorithm)  # C-speed loop on 3.11+
 
     h = hashlib.new(algorithm)
     total = path.stat().st_size if max_bytes is None else min(max_bytes, path.stat().st_size)

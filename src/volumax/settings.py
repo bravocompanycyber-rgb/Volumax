@@ -20,25 +20,38 @@ class Settings:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or SETTINGS_FILE
         self._data: dict[str, Any] = deepcopy(DEFAULT_SETTINGS)
+        self.recovered_from = ""
         self.load()
 
     def load(self) -> None:
+        """Load settings; a missing/corrupt file is repaired, never fatal."""
         if not self._path.exists():
             self.save()
             return
         try:
             with open(self._path, encoding="utf-8") as f:
                 loaded = json.load(f)
-            if isinstance(loaded, dict):
-                # Merge with defaults so new keys appear after upgrades
-                merged = deepcopy(DEFAULT_SETTINGS)
-                merged.update(loaded)
-                self._data = merged
-            else:
-                logger.warning("Settings file is not a dict; using defaults")
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.error("Failed to load settings: %s", exc)
+            if not isinstance(loaded, dict):
+                raise ValueError("settings root is not an object")
+        except (OSError, ValueError) as exc:  # JSONDecodeError is a ValueError
+            logger.error("Settings unreadable (%s); recovering", exc)
+            self.recovered_from = self._quarantine()
             self._data = deepcopy(DEFAULT_SETTINGS)
+            self.save()
+            return
+        merged = deepcopy(DEFAULT_SETTINGS)
+        merged.update(loaded)
+        self._data = merged
+
+    def _quarantine(self) -> str:
+        """Move the bad file aside (kept for the user) and return its new path."""
+        try:
+            import time
+            bad = self._path.with_name(f"{self._path.stem}.corrupt-{int(time.time())}{self._path.suffix}")
+            os.replace(self._path, bad)
+            return str(bad)
+        except OSError:
+            return ""
 
     def save(self) -> None:
         try:

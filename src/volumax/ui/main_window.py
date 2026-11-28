@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QStatusBar,
     QToolBar,
@@ -26,6 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..archive_manager import ArchiveManager
+from .. import vault
+from ..compat import looks_like_archive, safe_exists
+from .vault_dialogs import ContractPanel, VaultPage  # noqa: F401  (looks_like_archive is re-exported)
 from ..config import ASSETS_DIR
 from ..jobs import JobState, get_job_queue
 from ..settings import get_settings
@@ -39,6 +44,8 @@ from .settings_dialog import SettingsDialog
 from .integrity_page import IntegrityPage
 from .duplicates_page import DuplicatesPage
 from .volume_dialog import VolumeDialog
+from .tools_page import ToolsPage
+from .diagnostics_page import DiagnosticsPage
 
 logger = logging.getLogger("volumax.ui.main")
 
@@ -53,11 +60,14 @@ COLORS = {
     "bg_hover": "#2d3a50",
     "border": "#2a3548",
     "text": "#e8eef7",
-    "text_dim": "#8b9bb4",
-    "accent_blue": "#3b82f6",
+    "text_dim": "#a9b6cb",
+    "accent_blue": "#2563eb",
+    "accent_blue_hover": "#1d4ed8",
+    "link": "#7db4ff",
     "accent_gold": "#d4a017",
     "success": "#22c55e",
-    "danger": "#ef4444",
+    "danger": "#fca5a5",
+    "danger_fill": "#b91c1c",
     "warning": "#f59e0b",
 }
 
@@ -89,6 +99,27 @@ QToolBar QToolButton:hover {{
 QToolBar QToolButton:checked {{
     background-color: {COLORS["accent_blue"]};
     color: white;
+}}
+QAbstractItemView {{
+    background-color: {COLORS["bg_panel"]};
+    alternate-background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    selection-background-color: {COLORS["accent_blue"]};
+    selection-color: #ffffff;
+    gridline-color: {COLORS["border"]};
+    border: 1px solid {COLORS["border"]};
+    border-radius: 6px;
+}}
+QAbstractItemView::item:hover {{
+    background-color: {COLORS["bg_hover"]};
+}}
+QAbstractItemView {{
+    outline: 0;
+}}
+QAbstractItemView::item:selected, QAbstractItemView::item:selected:active,
+QAbstractItemView::item:selected:!active, QAbstractItemView::item:selected:hover {{
+    background-color: {COLORS["accent_blue"]};
+    color: #ffffff;
 }}
 QListWidget {{
     background-color: {COLORS["bg_panel"]};
@@ -125,7 +156,7 @@ QPushButton {{
     font-weight: 600;
 }}
 QPushButton:hover {{
-    background-color: #2563eb;
+    background-color: {COLORS["accent_blue_hover"]};
 }}
 QPushButton:disabled {{
     background-color: {COLORS["bg_hover"]};
@@ -143,7 +174,7 @@ QPushButton#gold {{
     color: #1a1a1a;
 }}
 QPushButton#danger {{
-    background-color: {COLORS["danger"]};
+    background-color: {COLORS["danger_fill"]};
 }}
 QLineEdit, QSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
     background-color: {COLORS["bg_card"]};
@@ -155,6 +186,13 @@ QLineEdit, QSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
 }}
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
     border-color: {COLORS["accent_blue"]};
+}}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border: 2px solid #8fa3c4; border-radius: 4px; background-color: #0f1725;
+}}
+QCheckBox::indicator:hover {{ border-color: #d4a017; }}
+QCheckBox::indicator:checked {{
+    background-color: #d4a017; border-color: #d4a017; image: url(@CHECK@);
 }}
 QGroupBox {{
     border: 1px solid {COLORS["border"]};
@@ -180,6 +218,39 @@ QProgressBar {{
 QProgressBar::chunk {{
     background-color: {COLORS["accent_blue"]};
     border-radius: 4px;
+}}
+QTabWidget::pane {{
+    border: 1px solid {COLORS["border"]};
+    border-radius: 8px;
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: {COLORS["bg_panel"]};
+    color: {COLORS["text_dim"]};
+    padding: 8px 16px;
+    margin-right: 2px;
+    border: 1px solid {COLORS["border"]};
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}}
+QTabBar::tab:hover {{
+    background-color: {COLORS["bg_hover"]};
+    color: {COLORS["text"]};
+}}
+QTabBar::tab:selected {{
+    background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    border-bottom: 3px solid {COLORS["accent_gold"]};
+    font-weight: 600;
+}}
+QHeaderView::section {{
+    background-color: {COLORS["bg_card"]};
+    color: {COLORS["text"]};
+    padding: 6px 8px;
+    border: none;
+    border-right: 1px solid {COLORS["border"]};
+    font-weight: 600;
 }}
 QScrollBar:vertical {{
     background: {COLORS["bg_panel"]};
@@ -213,6 +284,36 @@ QDialog {{
 """
 
 
+def apply_theme(app) -> None:
+    """Application-wide dark palette + Fusion style.
+
+    Without this, any widget the stylesheet does not name (e.g. a QTableView) falls back to the
+    Windows system palette: its alternate-row colour is WHITE, which made every second row of
+    the Archive Browser unreadable (light text on white).
+    """
+    from PySide6.QtGui import QPalette as P
+
+    if app.property("volumax_theme_applied"):   # once per process: restyling is expensive
+        return
+    app.setProperty("volumax_theme_applied", True)
+    app.setStyle("Fusion")  # identical rendering on Windows 8, 10 and 11
+    pal = P()
+    c = QColor
+    for role, col in (
+        (P.ColorRole.Window, COLORS["bg_dark"]), (P.ColorRole.WindowText, COLORS["text"]),
+        (P.ColorRole.Base, COLORS["bg_panel"]), (P.ColorRole.AlternateBase, COLORS["bg_card"]),
+        (P.ColorRole.Text, COLORS["text"]), (P.ColorRole.Button, COLORS["bg_card"]),
+        (P.ColorRole.ButtonText, COLORS["text"]), (P.ColorRole.BrightText, "#ffffff"),
+        (P.ColorRole.ToolTipBase, COLORS["bg_card"]), (P.ColorRole.ToolTipText, COLORS["text"]),
+        (P.ColorRole.Highlight, COLORS["accent_blue"]), (P.ColorRole.HighlightedText, "#ffffff"),
+        (P.ColorRole.Link, COLORS["link"]), (P.ColorRole.PlaceholderText, COLORS["text_dim"]),
+    ):
+        pal.setColor(role, c(col))
+    for role in (P.ColorRole.Text, P.ColorRole.WindowText, P.ColorRole.ButtonText):
+        pal.setColor(P.ColorGroup.Disabled, role, c(COLORS["text_dim"]))
+    app.setPalette(pal)
+
+
 NAV_ITEMS = [
     ("Home", "dashboard"),
     ("Create Archive", "create"),
@@ -224,18 +325,11 @@ NAV_ITEMS = [
     ("Integrity & Checksums", "integrity"),
     ("Duplicate Finder", "duplicates"),
     ("Job Queue", "queue"),
+    ("Tools", "tools"),
+    ("Vault", "vault"),
+    ("Diagnostics", "diagnostics"),
     ("Settings", "settings"),
 ]
-
-
-_ARCHIVE_SUFFIXES = (
-    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tbz2", ".tbz", ".txz",
-    ".iso", ".cab", ".wim", ".001", ".zipx", ".jar", ".apk", ".arj", ".lzh", ".z",
-)
-
-
-def looks_like_archive(path: Path) -> bool:
-    return path.name.lower().endswith(_ARCHIVE_SUFFIXES)
 
 
 class DashboardPage(QWidget):
@@ -243,6 +337,7 @@ class DashboardPage(QWidget):
 
     navigate = Signal(str)          # page key
     open_requested = Signal(str)    # archive path
+    recent_changed = Signal(list)   # new history after the user removed entries
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -268,32 +363,58 @@ class DashboardPage(QWidget):
         )
         layout.addWidget(drop)
 
-        cards = QHBoxLayout()
-        for label, desc, key in [
+        cards = QGridLayout()
+        cards.setSpacing(12)
+        for i, (label, desc, key) in enumerate([
             ("Create", "7z, ZIP, TAR.XZ/GZ/BZ2 — up to Ultra compression", "create"),
             ("Extract", "Safe extraction with protections", "extract"),
             ("Browse", "Open any archive instantly and search it", "browser"),
             ("Convert", "Re-pack RAR/ZIP into smaller 7z", "convert"),
             ("Packages", "Independent size-limited ZIPs", "packages"),
             ("Volumes", "Multipart split archives", "volumes"),
-        ]:
-            card = QPushButton(f"{label}\n{desc}")
+        ]):
+            card = QPushButton()
             card.setCursor(Qt.CursorShape.PointingHandCursor)
-            card.setMinimumHeight(96)
+            card.setMinimumHeight(88)
+            card.setAccessibleName(f"{label}: {desc}")
             card.setStyleSheet(
-                f"QPushButton {{ background-color: {COLORS['bg_card']}; border-radius: 10px; "
-                f"padding: 12px; text-align: left; color: {COLORS['text_dim']}; }}"
-                f"QPushButton:hover {{ background-color: {COLORS['bg_hover']}; "
-                f"color: {COLORS['text']}; }}"
+                f"QPushButton {{ background-color: {COLORS['bg_card']}; border-radius: 10px; }}"
+                f"QPushButton:hover {{ background-color: {COLORS['bg_hover']}; }}"
             )
+            inner = QVBoxLayout(card)
+            inner.setContentsMargins(14, 10, 14, 10)
+            head = QLabel(label)
+            head.setStyleSheet(f"background: transparent; font-weight: 700; font-size: 14px; color: {COLORS['text']};")
+            body = QLabel(desc)
+            body.setWordWrap(True)
+            body.setStyleSheet(f"background: transparent; color: {COLORS['text_dim']}; font-weight: 400;")
+            for lbl in (head, body):
+                lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                inner.addWidget(lbl)
+            inner.addStretch()
             card.clicked.connect(lambda _c=False, k=key: self.navigate.emit(k))
-            cards.addWidget(card)
+            cards.addWidget(card, i // 3, i % 3)
         layout.addLayout(cards)
 
+        recent_row = QHBoxLayout()
         recent_title = QLabel("Recent archives")
         recent_title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(recent_title)
+        recent_row.addWidget(recent_title)
+        recent_row.addStretch()
+        self.btn_clear_missing = QPushButton("Remove missing")
+        self.btn_clear_missing.setObjectName("secondary")
+        self.btn_clear_missing.setToolTip("Forget entries whose files no longer exist")
+        self.btn_clear_missing.clicked.connect(self._forget_missing)
+        self.btn_clear_recent = QPushButton("Clear history")
+        self.btn_clear_recent.setObjectName("secondary")
+        self.btn_clear_recent.setToolTip("Forget all recently opened archives (the files themselves are not touched)")
+        self.btn_clear_recent.clicked.connect(lambda: self.recent_changed.emit([]))
+        recent_row.addWidget(self.btn_clear_missing)
+        recent_row.addWidget(self.btn_clear_recent)
+        layout.addLayout(recent_row)
         self.recent = QListWidget()
+        self.recent.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.recent.customContextMenuRequested.connect(self._recent_menu)
         self.recent.setMaximumHeight(220)
         self.recent.itemActivated.connect(
             lambda it: self.open_requested.emit(it.data(Qt.ItemDataRole.UserRole))
@@ -304,8 +425,45 @@ class DashboardPage(QWidget):
         layout.addWidget(self.recent)
         layout.addStretch()
 
+    def _paths(self) -> list[str]:
+        out = []
+        for i in range(self.recent.count()):
+            v = self.recent.item(i).data(Qt.ItemDataRole.UserRole)
+            if v:
+                out.append(v)
+        return out
+
+    def _forget_missing(self) -> None:
+        self.recent_changed.emit([p for p in self._paths() if safe_exists(Path(p))])
+
+    def _recent_menu(self, pos) -> None:
+        item = self.recent.itemAt(pos)
+        if item is None or not item.data(Qt.ItemDataRole.UserRole):
+            return
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act = menu.addAction("Remove from history")
+        if menu.exec(self.recent.viewport().mapToGlobal(pos)) is act:
+            gone = item.data(Qt.ItemDataRole.UserRole)
+            self.recent_changed.emit([p for p in self._paths() if p != gone])
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Delete and self.recent.hasFocus():
+            it = self.recent.currentItem()
+            if it is not None and it.data(Qt.ItemDataRole.UserRole):
+                gone = it.data(Qt.ItemDataRole.UserRole)
+                self.recent_changed.emit([p for p in self._paths() if p != gone])
+                return
+        super().keyPressEvent(event)
+
     def set_recent(self, paths: list[str]) -> None:
         self.recent.clear()
+        self.btn_clear_recent.setEnabled(bool(paths))
+        self.btn_clear_missing.setEnabled(bool(paths))
+        if not paths:
+            hint = QListWidgetItem("No recent archives yet — open one with the button above, or drop it here.")
+            hint.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.recent.addItem(hint)
         for path in paths:
             p = Path(path)
             item = QListWidgetItem(f"{p.name}    —    {p.parent}")
@@ -342,11 +500,15 @@ class MainWindow(QMainWindow):
 
         # Icon
         icon_path = ASSETS_DIR / "logo.ico"
-        if icon_path.exists():
+        if safe_exists(icon_path):
             self.setWindowIcon(QIcon(str(icon_path)))
 
         self._build_ui()
-        self.setStyleSheet(STYLESHEET)
+        from PySide6.QtWidgets import QApplication as _A
+
+        if _A.instance() is not None:
+            apply_theme(_A.instance())
+        self.setStyleSheet(STYLESHEET.replace("@CHECK@", (ASSETS_DIR / "check.png").as_posix()))
 
         self._job_timer = QTimer(self)
         self._job_timer.timeout.connect(self._poll_jobs)
@@ -380,7 +542,43 @@ class MainWindow(QMainWindow):
 
         # Content stack
         self.stack = QStackedWidget()
-        root.addWidget(self.stack, 1)
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(0)
+        # In-window failure banner: never a pop-up window, so there is no dialog lifetime to get
+        # wrong (separate QMessageBox objects crashed PySide2 on Windows).
+        self.banner = QFrame()
+        self.banner.setObjectName("banner")
+        self.banner.setStyleSheet(
+            f"QFrame#banner {{ background-color: {COLORS['danger_fill']}; border-radius: 0px; }}"
+            "QFrame#banner QLabel { background: transparent; color: #ffffff; font-weight: 600; }"
+            "QFrame#banner QPushButton { background-color: rgba(255,255,255,0.18); color: #ffffff; "
+            "border: 1px solid rgba(255,255,255,0.55); padding: 4px 12px; border-radius: 6px; }"
+            "QFrame#banner QPushButton:hover { background-color: rgba(255,255,255,0.32); }"
+        )
+        brow = QHBoxLayout(self.banner)
+        brow.setContentsMargins(16, 8, 12, 8)
+        self.banner_text = QLabel("")
+        self.banner_text.setWordWrap(True)
+        self.banner_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        btn_q = QPushButton("Show Job Queue")
+        btn_q.clicked.connect(lambda: (self.goto("queue"), self.banner.hide()))
+        btn_x = QPushButton("Dismiss")
+        btn_x.clicked.connect(self.banner.hide)
+        brow.addWidget(self.banner_text, 1)
+        brow.addWidget(btn_q)
+        brow.addWidget(btn_x)
+        self.banner.hide()
+        self.contract = ContractPanel()
+        content.addWidget(self.contract)
+        try:
+            from ..vault_store import default_store
+            self.contract.setVisible(not default_store().contract_accepted())
+        except Exception:
+            self.contract.setVisible(False)    # never block the app on a store problem
+        content.addWidget(self.banner)
+        content.addWidget(self.stack, 1)
+        root.addLayout(content, 1)
 
         # Pages
         self.pages: dict[str, QWidget] = {}
@@ -394,10 +592,19 @@ class MainWindow(QMainWindow):
         self.pages["integrity"] = IntegrityPage(self.manager)
         self.pages["duplicates"] = DuplicatesPage()
         self.pages["queue"] = QueuePanel(self.queue)
+        self.pages["tools"] = ToolsPage(self.manager)
+        self.pages["diagnostics"] = DiagnosticsPage(self.manager)
+        self.pages["vault"] = VaultPage()
         self.pages["settings"] = SettingsDialog(self.settings, embedded=True, manager=self.manager)
 
         for label, key in NAV_ITEMS:
-            self.stack.addWidget(self.pages[key])
+            # Scroll wrapper: a page never gets squashed below its natural size
+            # (controls stay readable on small windows / high DPI scaling).
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setWidget(self.pages[key])
+            self.stack.addWidget(scroll)
 
         self.nav.setCurrentRow(0)
         dash = self.pages["dashboard"]
@@ -405,11 +612,17 @@ class MainWindow(QMainWindow):
         dash.open_requested.connect(lambda p: self.open_archive(Path(p)))
         dash.set_recent(self.settings.get("recent_archives", []))
         self.pages["browser"].opened.connect(self._remember_recent)
+        self.pages["browser"].vault_found.connect(lambda p: self.open_archive(Path(p)))
+        dash.recent_changed.connect(self._set_recent)
 
         # Status bar
         self.status = QStatusBar()
         self.setStatusBar(self.status)
-        self.status.showMessage("Ready")
+        if self.manager.engine.available:
+            self.status.showMessage("Ready")
+        else:
+            self.status.showMessage("7-Zip engine not found — open Diagnostics and press Repair")
+            QTimer.singleShot(400, lambda: self.goto("diagnostics"))
 
         # Toolbar
         tb = QToolBar("Main")
@@ -447,8 +660,18 @@ class MainWindow(QMainWindow):
                 return
 
     def open_archive(self, path: Path) -> None:
+        if vault.sniff(path):      # recognised by signature, whatever the file is called
+            self.goto("vault")
+            self.pages["vault"].load(Path(path))
+            return
         self.goto("browser")
+        self.pages["tools"].set_archive(Path(path))
         self.pages["browser"].load_archive(Path(path))
+
+    def _set_recent(self, recent: list) -> None:
+        self.settings.set("recent_archives", list(recent))
+        self.settings.save()
+        self.pages["dashboard"].set_recent(list(recent))
 
     def _remember_recent(self, path: str) -> None:
         recent = [p for p in self.settings.get("recent_archives", []) if p != path]
@@ -467,7 +690,7 @@ class MainWindow(QMainWindow):
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
         if not paths:
             return
-        if len(paths) == 1 and paths[0].is_file() and looks_like_archive(paths[0]):
+        if len(paths) == 1 and paths[0].is_file() and (looks_like_archive(paths[0]) or vault.sniff(paths[0])):
             self.open_archive(paths[0])
         else:
             self.goto("create")
@@ -502,9 +725,25 @@ class MainWindow(QMainWindow):
             if extra.get("needs_password"):
                 msg = "This archive is password-protected, or the password was wrong."
             self.status.showMessage(f"✖ {job.name} failed", 20000)
-            QMessageBox.warning(self, f"{job.name} failed", str(msg)[:1500])
+            self._notify_failure(job.name, str(msg))
+
+    def _notify_failure(self, name: str, msg: str) -> None:
+        """Show ONE failure banner inside the window; further failures only bump a counter."""
+        if self.banner.isVisible():
+            self._fail_more = getattr(self, "_fail_more", 0) + 1
+            self.banner_text.setText(
+                f"✖ {self._fail_first}   (+{self._fail_more} more failed — see the Job Queue)")
+            return
+        self._fail_more = 0
+        self._fail_first = f"{name} failed: {msg}"[:400]
+        self.banner_text.setText("✖ " + self._fail_first)
+        self.banner.show()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        try:
+            self._job_timer.stop()      # a closed window must not keep announcing jobs
+        except Exception:
+            pass
         try:
             self.settings.set("window_geometry", self.saveGeometry().toHex().data().decode())
             self.settings.save()

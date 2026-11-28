@@ -83,7 +83,7 @@ class SettingsDialog(QWidget):
         layout.addWidget(g1)
 
         # --- packages / volumes
-        g2 = QGroupBox("Packages & volumes")
+        g2 = QGroupBox("Packages && volumes")
         f2 = QFormLayout(g2)
         self.zip_max = self._spin(1, 102400, s.independent_zip_max_mb, " MB")
         f2.addRow("Independent ZIP max size:", self.zip_max)
@@ -113,10 +113,10 @@ class SettingsDialog(QWidget):
         f4.addRow("Log level (restart to apply):", self.log_level)
         self.engine_label = QLabel(self._engine_text())
         self.engine_label.setWordWrap(True)
-        self.engine_label.setStyleSheet("color: #8b9bb4;")
+        self.engine_label.setStyleSheet("color: #a9b6cb;")
         f4.addRow("Engine:", self.engine_label)
         self.path_label = QLabel(str(s.path))
-        self.path_label.setStyleSheet("color: #8b9bb4;")
+        self.path_label.setStyleSheet("color: #a9b6cb;")
         self.path_label.setWordWrap(True)
         f4.addRow("Settings file:", self.path_label)
         layout.addWidget(g4)

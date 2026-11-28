@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 
+from .compat import is_relative_to
 from .backends.sevenzip import tar_codec
 from .engine import EngineResult, SevenZipEngine, extract_zip_native
 from .settings import get_settings
@@ -41,14 +42,28 @@ class ExtractionSafety:
         allow_absolute: bool = False,
         allow_symlinks: bool = False,
     ) -> None:
-        settings = get_settings()
-        self.max_files = max_files if max_files is not None else settings.get("max_extraction_files", 3_000_000)
-        self.max_total_size = max_total_size
-        if self.max_total_size is None:
-            gb = settings.get("max_extraction_size_gb", 10_000)
-            self.max_total_size = int(gb) * 1024 * 1024 * 1024
+        # Explicit values win; otherwise limits are read LIVE from settings so a change in
+        # Settings applies to the very next extraction (no restart needed).
+        self._max_files = max_files
+        self._max_total_size = max_total_size
         self.allow_absolute = allow_absolute
         self.allow_symlinks = allow_symlinks
+
+    @property
+    def max_files(self) -> int:
+        if self._max_files is not None:
+            return self._max_files
+        return int(get_settings().get("max_extraction_files", 3_000_000))
+
+    @property
+    def max_total_size(self) -> int:
+        if self._max_total_size is not None:
+            return self._max_total_size
+        return int(get_settings().get("max_extraction_size_gb", 10_000)) * 1024 * 1024 * 1024
+
+    @property
+    def max_ratio(self) -> int:
+        return int(get_settings().get("max_compression_ratio", 20_000))
 
     def validate_entry_name(self, name: str) -> list[str]:
         """Return list of violation reasons (empty = ok)."""
@@ -105,6 +120,7 @@ class ExtractionSafety:
     ) -> SafetyReport:
         reasons: list[str] = []
         rejected: list[str] = []
+        total_packed = 0
         total_size = 0
         file_count = 0
 
@@ -122,10 +138,16 @@ class ExtractionSafety:
             if not is_dir:
                 file_count += 1
                 total_size += max(size, 0)
+                total_packed += max(int(getattr(entry, "compressed_size", 0) or 0), 0)
 
         if file_count > self.max_files:
             reasons.append(
                 f"too many files ({file_count} > limit {self.max_files})"
+            )
+        ratio_limit = self.max_ratio
+        if ratio_limit and total_size > 1024 ** 3 and total_packed > 0 and total_size / total_packed > ratio_limit:
+            reasons.append(
+                f"suspicious compression ratio ({total_size // total_packed:,}:1 > {ratio_limit:,}:1) — possible ZIP bomb"
             )
         if total_size > self.max_total_size:
             reasons.append(
@@ -158,7 +180,7 @@ class ExtractionSafety:
             target = (base_resolved / cleaned).resolve()
             # is_relative_to is component-aware (a plain startswith would let
             # /data/out-evil pass as inside /data/out)
-            if not target.is_relative_to(base_resolved):
+            if not is_relative_to(target, base_resolved):
                 return None
             return target
         except (OSError, ValueError):

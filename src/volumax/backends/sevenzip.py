@@ -76,11 +76,30 @@ class SevenZipBackend(ArchiveBackend):
     def __init__(self, exe_path: Path | None = None) -> None:
         self.exe = Path(exe_path) if exe_path else find_7zip_exe()
         if self.exe is None or not self.exe.is_file():
-            raise FileNotFoundError(
-                "7-Zip engine not found. Place 7z.exe in engines/7zip/ "
-                "or install 7-Zip system-wide."
-            )
-        logger.info("7-Zip backend: %s", self.exe)
+            # Never crash at start-up: the app opens, Diagnostics offers a fix, and
+            # the engine is re-detected live (see ``ensure_engine``).
+            logger.error("7-Zip engine not found at start-up")
+            self.exe = None  # type: ignore[assignment]
+        else:
+            logger.info("7-Zip backend: %s", self.exe)
+
+    @property
+    def available(self) -> bool:
+        return self.ensure_engine()
+
+    def ensure_engine(self) -> bool:
+        """True when a runnable engine is known; re-detects if it vanished/appeared."""
+        try:
+            if self.exe is not None and Path(self.exe).is_file():
+                return True
+        except OSError:
+            pass
+        found = find_7zip_exe()
+        self.exe = found  # type: ignore[assignment]
+        return found is not None
+
+    def set_exe(self, path: Path) -> None:
+        self.exe = Path(path)
 
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
@@ -141,6 +160,13 @@ class SevenZipBackend(ArchiveBackend):
         pipe_to: Sequence[str] | None = None,
     ) -> BackendResult:
         """Run 7-Zip (optionally ``args | pipe_to``), draining pipes continuously."""
+        if not self.ensure_engine():
+            return BackendResult(
+                False,
+                "The 7-Zip engine was not found. Open Diagnostics and press Repair "
+                "(or 'Locate 7z.exe'), or reinstall VOLUMAX.",
+                returncode=-1,
+            )
         logger.debug("CMD: %s %s", self.exe, " ".join(args))
         procs: list[subprocess.Popen] = []
         out_chunks: list[str] = []

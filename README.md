@@ -153,3 +153,17 @@ Replace `assets/logo.ico` and `assets/logo.png` with your final branding — no 
 ## License
 
 Proprietary — Bravo Projects / Bravo Company Cyber. All rights reserved.
+
+
+## Build installers (Windows 8 → 11)
+
+Double-click `BUILD-ALL.cmd` (or run `.\BUILD-ALL.ps1`). It produces Setup installers and portable zips for
+Windows 10/11 (Modern) and Windows 8/8.1 64/32-bit (Legacy) in `release\`. Details: [docs/BUILD.md](docs/BUILD.md).
+
+
+## Highlights (1.2)
+- Opens and lists huge archives instantly; adaptive maximum compression; AES-256 with hidden file names.
+- Self-healing: starts without its engine, repairs itself (Diagnostics), recovers corrupt settings, keeps your old archive if a run fails.
+- Verify after create + SHA-256 file, Preview inside archives, Compare, Find across archives, Salvage damaged archives,
+  Small-file Pack (Zstandard), Export-as-script for scheduled backups.
+- Windows 8 to 11 (Modern + Legacy builds). See `DEPENDENCIES.txt` and `docs/BUILD.md`.
